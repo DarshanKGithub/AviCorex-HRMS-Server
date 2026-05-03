@@ -1,0 +1,474 @@
+from datetime import datetime, timezone, date
+from uuid import uuid4
+
+from sqlalchemy import Boolean, DateTime, String, Date, Numeric
+from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
+
+from app.core.security import hash_password
+from app.db.database import Base
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+SEED_USERS = [
+    ('Aditi Sharma', 'admin@hrms.com', 'Admin'),
+    ('Riya Nair', 'hr@hrms.com', 'HR'),
+    ('Arjun Mehta', 'manager@hrms.com', 'Manager'),
+    ('Neha Kapoor', 'employee@hrms.com', 'Employee'),
+    ('Vikram Rao', 'ceo@hrms.com', 'CEO'),
+]
+
+
+def seed_demo_users(db: Session) -> None:
+    existing_emails = set(db.query(User.email).all())
+    existing_emails = {email for (email,) in existing_emails}
+    created = False
+
+    for full_name, email, role in SEED_USERS:
+        normalized_email = email.lower()
+        if normalized_email in existing_emails:
+            continue
+
+        # Generate a shared id so seeded User and Employee map to same id for demo convenience
+        new_id = str(uuid4())
+
+        db.add(
+            User(
+                id=new_id,
+                full_name=full_name,
+                email=normalized_email,
+                role=role,
+                password_hash=hash_password('Hrms@12345'),
+            )
+        )
+
+        # Also create a corresponding Employee record so front-end "user.id" maps to an employee
+        try:
+            db.add(
+                Employee(
+                    id=new_id,
+                    full_name=full_name,
+                    email=normalized_email,
+                )
+            )
+        except Exception:
+            # If Employee class not yet defined or other issue, skip creating employee here
+            pass
+
+        created = True
+
+    if created:
+        db.commit()
+
+
+# --- Phase 2 models: Departments, Designations, Employees ---
+from sqlalchemy import ForeignKey
+
+
+class Department(Base):
+    __tablename__ = 'departments'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Designation(Base):
+    __tablename__ = 'designations'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Employee(Base):
+    __tablename__ = 'employees'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    department_id: Mapped[str] = mapped_column(String(36), ForeignKey('departments.id'), nullable=True)
+    designation_id: Mapped[str] = mapped_column(String(36), ForeignKey('designations.id'), nullable=True)
+    manager_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class AuditLog(Base):
+    __tablename__ = 'audit_logs'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    action: Mapped[str] = mapped_column(String(60), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    data: Mapped[str] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+def seed_demo_org(db: Session) -> None:
+    """Seed a couple of departments/designations for Phase 2 initial data."""
+    try:
+        existing_depts = {name for (name,) in db.query(Department.name).all()}
+    except Exception:
+        existing_depts = set()
+
+    defaults = ["Engineering", "People Operations", "Finance"]
+    created = False
+    for name in defaults:
+        if name in existing_depts:
+            continue
+        db.add(Department(name=name))
+        created = True
+
+    try:
+        existing_designs = {name for (name,) in db.query(Designation.name).all()}
+    except Exception:
+        existing_designs = set()
+
+    designs = ["Engineer", "HR Manager", "Payroll Specialist"]
+    for name in designs:
+        if name in existing_designs:
+            continue
+        db.add(Designation(name=name))
+        created = True
+
+    if created:
+        db.commit()
+
+
+# --- Phase 4 models: Shifts, Attendance, Attendance Rules ---
+from datetime import date, time
+
+
+class Shift(Base):
+    __tablename__ = 'shifts'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g., "Morning", "Evening", "Night"
+    start_time: Mapped[time] = mapped_column(nullable=False)  # e.g., 09:00
+    end_time: Mapped[time] = mapped_column(nullable=False)  # e.g., 18:00
+    grace_period_minutes: Mapped[int] = mapped_column(nullable=False, default=0)  # e.g., 5 minutes grace
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class EmployeeShiftAssignment(Base):
+    __tablename__ = 'employee_shift_assignments'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    shift_id: Mapped[str] = mapped_column(String(36), ForeignKey('shifts.id'), nullable=False)
+    start_date: Mapped[date] = mapped_column(nullable=False)  # When assignment starts
+    end_date: Mapped[date] = mapped_column(nullable=True)  # When assignment ends (null = ongoing)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Attendance(Base):
+    __tablename__ = 'attendance'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    attendance_date: Mapped[date] = mapped_column(nullable=False, index=True)
+    check_in_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_out_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # present, absent, half-day, work-from-home
+    is_late: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    late_minutes: Mapped[int] = mapped_column(nullable=False, default=0)
+    is_half_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_work_from_home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class AttendanceRule(Base):
+    __tablename__ = 'attendance_rules'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g., "Late Entry After 9:30 AM"
+    rule_type: Mapped[str] = mapped_column(String(60), nullable=False)  # late_entry, early_exit, half_day, etc.
+    threshold_minutes: Mapped[int] = mapped_column(nullable=False)  # e.g., 30 minutes late = late entry
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+def seed_demo_shifts(db: Session) -> None:
+    """Seed default shifts for Phase 4."""
+    try:
+        existing_shifts = {name for (name,) in db.query(Shift.name).all()}
+    except Exception:
+        existing_shifts = set()
+
+    shifts_data = [
+        ("Morning", "09:00", "18:00", 5),
+        ("Evening", "14:00", "23:00", 5),
+        ("Night", "23:00", "08:00", 5),
+    ]
+    created = False
+    for name, start_str, end_str, grace in shifts_data:
+        if name in existing_shifts:
+            continue
+        from datetime import time as time_type
+        start_time = time_type(*map(int, start_str.split(":")))
+        end_time = time_type(*map(int, end_str.split(":")))
+        db.add(Shift(name=name, start_time=start_time, end_time=end_time, grace_period_minutes=grace))
+        created = True
+
+    try:
+        existing_rules = {name for (name,) in db.query(AttendanceRule.name).all()}
+    except Exception:
+        existing_rules = set()
+
+    rules_data = [
+        ("Late Entry After 30 Minutes", "late_entry", 30),
+        ("Half Day Below 4 Hours", "half_day", 240),
+        ("Early Exit More Than 30 Minutes", "early_exit", 30),
+    ]
+    for name, rule_type, threshold in rules_data:
+        if name in existing_rules:
+            continue
+        db.add(AttendanceRule(name=name, rule_type=rule_type, threshold_minutes=threshold))
+        created = True
+
+    if created:
+        db.commit()
+
+
+def seed_demo_leave_data(db: Session) -> None:
+    """Seed default leave types and a couple of holidays for Phase 5 demo."""
+    try:
+        existing_types = {name for (name,) in db.query(LeaveType.name).all()}
+    except Exception:
+        existing_types = set()
+
+    leave_types = [
+        ("Casual Leave", "Short-term casual leave", 7),
+        ("Sick Leave", "Sick or medical leave", 10),
+        ("Paid Leave", "Paid annual leave", 14),
+    ]
+    created = False
+    for name, desc, days in leave_types:
+        if name in existing_types:
+            continue
+        try:
+            db.add(LeaveType(name=name, description=desc, default_days_per_year=days))
+            created = True
+        except Exception:
+            continue
+
+    try:
+        existing_holidays = {d for (d,) in db.query(Holiday.holiday_date).all()}
+    except Exception:
+        existing_holidays = set()
+
+    holidays = [
+        ("New Year's Day", date(2026, 1, 1)),
+        ("Company Foundation Day", date(2026, 8, 15)),
+    ]
+    for name, hd in holidays:
+        if hd in existing_holidays:
+            continue
+        try:
+            db.add(Holiday(name=name, holiday_date=hd, is_public=True))
+            created = True
+        except Exception:
+            continue
+
+    if created:
+        db.commit()
+
+
+# --- Phase 5 models: Leave Management ---
+from sqlalchemy import Integer
+
+
+class LeaveType(Base):
+    __tablename__ = 'leave_types'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=True)
+    default_days_per_year: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class LeaveBalance(Base):
+    __tablename__ = 'leave_balances'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    leave_type_id: Mapped[str] = mapped_column(String(36), ForeignKey('leave_types.id'), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class LeaveRequest(Base):
+    __tablename__ = 'leave_requests'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    leave_type_id: Mapped[str] = mapped_column(String(36), ForeignKey('leave_types.id'), nullable=False)
+    start_date: Mapped[date] = mapped_column(nullable=False)
+    end_date: Mapped[date] = mapped_column(nullable=False)
+    days_requested: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected, cancelled
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Holiday(Base):
+    __tablename__ = 'holidays'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    holiday_date: Mapped[date] = mapped_column(nullable=False, index=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# --- Phase 6 models: Payroll Management ---
+from sqlalchemy import Numeric
+
+
+class Salary(Base):
+    __tablename__ = 'salaries'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True, unique=True)
+    base_salary: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    grade: Mapped[str] = mapped_column(String(50), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default='INR')
+    effective_from: Mapped[date] = mapped_column(nullable=False)
+    effective_to: Mapped[date] = mapped_column(nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class SalaryComponent(Base):
+    __tablename__ = 'salary_components'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    component_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class EmployeeSalaryComponent(Base):
+    __tablename__ = 'employee_salary_components'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    salary_component_id: Mapped[str] = mapped_column(String(36), ForeignKey('salary_components.id'), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    is_fixed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Payslip(Base):
+    __tablename__ = 'payslips'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_salary: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    gross_salary: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    total_deductions: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    total_tax: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    net_salary: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    days_worked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    days_absent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='draft')
+    processed_by: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class PayslipComponent(Base):
+    __tablename__ = 'payslip_components'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    payslip_id: Mapped[str] = mapped_column(String(36), ForeignKey('payslips.id'), nullable=False, index=True)
+    salary_component_id: Mapped[str] = mapped_column(String(36), ForeignKey('salary_components.id'), nullable=False)
+    component_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    component_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class SalaryHistory(Base):
+    """Tracks all salary changes for audit trail and compliance."""
+    __tablename__ = 'salary_history'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    salary_id: Mapped[str | None] = mapped_column(String(36), ForeignKey('salaries.id'), nullable=True)
+    base_salary: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    grade: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default='INR')
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    reason_for_change: Mapped[str | None] = mapped_column(String(255), nullable=True)  # e.g., 'promotion', 'salary_revision', 'demotion'
+    modified_by: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    employee: Mapped[Employee] = relationship('Employee', foreign_keys=[employee_id])
+    modified_by_user: Mapped[User] = relationship('User', foreign_keys=[modified_by])
+
+    def __repr__(self) -> str:
+        return f'<SalaryHistory(employee_id={self.employee_id}, base_salary={self.base_salary}, effective_from={self.effective_from})>'
+
+
+def seed_demo_salary_data(db: Session) -> None:
+    """Seed default salary components for payroll demo."""
+    try:
+        existing_components = {name for (name,) in db.query(SalaryComponent.name).all()}
+    except Exception:
+        existing_components = set()
+
+    components_data = [
+        ("Basic Salary", "earning", "Monthly base salary"),
+        ("House Rent Allowance", "earning", "HRA component"),
+        ("Dearness Allowance", "earning", "DA component"),
+        ("Provident Fund", "deduction", "PF contribution"),
+        ("Income Tax", "tax", "IT deduction"),
+    ]
+    created = False
+    for name, comp_type, desc in components_data:
+        if name in existing_components:
+            continue
+        try:
+            db.add(SalaryComponent(name=name, component_type=comp_type, description=desc))
+            created = True
+        except Exception:
+            continue
+
+    if created:
+        db.commit()

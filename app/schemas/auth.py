@@ -1,0 +1,37 @@
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=6)
+    role: str | None = None
+
+
+class UserPublic(BaseModel):
+    id: str
+    full_name: str
+    email: str
+    role: str
+    employee_id: str | None = None
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: Literal['bearer'] = 'bearer'
+    expires_in: int
+    user: UserPublic
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=120)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=6)
+    new_password: str = Field(min_length=6)
+
+
+class PasswordChangeResponse(BaseModel):
+    message: str

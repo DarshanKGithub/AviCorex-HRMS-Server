@@ -1,0 +1,607 @@
+"""Services for Payroll Management (Phase 6)."""
+from datetime import datetime, date
+from calendar import monthrange
+from sqlalchemy import select, func, and_
+from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+
+from app.db.models import (
+    Salary, SalaryComponent, EmployeeSalaryComponent, Payslip,
+    PayslipComponent, Employee, AuditLog, Attendance, SalaryHistory, User
+)
+
+
+def calculate_days_worked_from_attendance(employee_id: str, month: int, year: int, db: Session) -> tuple[int, int]:
+    """Calculate days worked and days absent from attendance records for a given month/year.
+    Returns (days_worked, days_absent)."""
+    # Get all days in the month
+    _, days_in_month = monthrange(year, month)
+    
+    # Query attendance records for the employee in the month
+    attendances = db.query(Attendance).filter(
+        Attendance.employee_id == employee_id,
+        func.extract('year', Attendance.attendance_date) == year,
+        func.extract('month', Attendance.attendance_date) == month,
+    ).all()
+    
+    # Count working days (assuming working days are Mon-Fri, excluding holidays)
+    working_days = 0
+    days_worked = 0
+    days_absent = 0
+    
+    for day in range(1, days_in_month + 1):
+        current_date = date(year, month, day)
+        # Skip weekends (5=Saturday, 6=Sunday)
+        if current_date.weekday() in [5, 6]:
+            continue
+        working_days += 1
+        
+        # Find attendance record for this day
+        att = next((a for a in attendances if a.attendance_date == current_date), None)
+        if att:
+            if att.status in ['present', 'work-from-home']:
+                if att.is_half_day:
+                    days_worked += 0.5
+                else:
+                    days_worked += 1
+            elif att.status == 'half-day':
+                days_worked += 0.5
+        else:
+            # No attendance record = absent
+            days_absent += 1
+    
+    return int(days_worked), days_absent
+
+
+def get_or_create_salary(employee_id: str, db: Session) -> Salary:
+    """Get employee's current active salary record."""
+    sal = db.query(Salary).filter(
+        Salary.employee_id == employee_id,
+        Salary.is_active.is_(True)
+    ).first()
+    if not sal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No active salary found for employee')
+    return sal
+
+
+def calculate_gross_salary(employee_id: str, db: Session) -> tuple[float, list]:
+    """Calculate gross salary (base + all earnings) for an employee.
+    Returns (gross_amount, list of earning components)."""
+    salary = get_or_create_salary(employee_id, db)
+    base = float(salary.base_salary)
+    
+    # Get all earnings components for employee
+    earnings = db.query(EmployeeSalaryComponent).join(
+        SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
+    ).filter(
+        EmployeeSalaryComponent.employee_id == employee_id,
+        SalaryComponent.component_type == 'earning'
+    ).all()
+    
+    earning_components = [{'name': 'Basic Salary', 'amount': base}]
+    total_earnings = base
+    
+    for ecomp in earnings:
+        comp = db.query(SalaryComponent).filter(SalaryComponent.id == ecomp.salary_component_id).first()
+        if comp:
+            earning_components.append({'name': comp.name, 'amount': float(ecomp.amount)})
+            total_earnings += float(ecomp.amount)
+    
+    return total_earnings, earning_components
+
+
+def calculate_deductions_and_tax(employee_id: str, gross_salary: float, db: Session) -> tuple[float, float, list, list]:
+    """Calculate total deductions and tax.
+    Returns (total_deductions, total_tax, deduction_components, tax_components)."""
+    
+    # Get deduction components
+    deductions = db.query(EmployeeSalaryComponent).join(
+        SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
+    ).filter(
+        EmployeeSalaryComponent.employee_id == employee_id,
+        SalaryComponent.component_type == 'deduction'
+    ).all()
+    
+    deduction_components = []
+    total_deductions = 0.0
+    for dcomp in deductions:
+        comp = db.query(SalaryComponent).filter(SalaryComponent.id == dcomp.salary_component_id).first()
+        if comp:
+            deduction_components.append({'name': comp.name, 'amount': float(dcomp.amount)})
+            total_deductions += float(dcomp.amount)
+    
+    # Get tax components
+    taxes = db.query(EmployeeSalaryComponent).join(
+        SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
+    ).filter(
+        EmployeeSalaryComponent.employee_id == employee_id,
+        SalaryComponent.component_type == 'tax'
+    ).all()
+    
+    tax_components = []
+    total_tax = 0.0
+    for tcomp in taxes:
+        comp = db.query(SalaryComponent).filter(SalaryComponent.id == tcomp.salary_component_id).first()
+        if comp:
+            tax_components.append({'name': comp.name, 'amount': float(tcomp.amount)})
+            total_tax += float(tcomp.amount)
+    
+    return total_deductions, total_tax, deduction_components, tax_components
+
+
+def create_payslip(employee_id: str, month: int, year: int, days_worked: int | None = None, 
+                   days_absent: int | None = None, db: Session = None) -> Payslip:
+    """Generate payslip for an employee for a given month/year.
+    If days_worked/days_absent not provided, auto-calculate from attendance records."""
+    
+    # Validate employee exists
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
+    
+    # Check if payslip already exists
+    existing = db.query(Payslip).filter(
+        Payslip.employee_id == employee_id,
+        Payslip.month == month,
+        Payslip.year == year
+    ).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payslip already exists for this month')
+    
+    # Auto-calculate days worked from attendance if not provided
+    if days_worked is None or days_absent is None:
+        calculated_worked, calculated_absent = calculate_days_worked_from_attendance(employee_id, month, year, db)
+        if days_worked is None:
+            days_worked = calculated_worked
+        if days_absent is None:
+            days_absent = calculated_absent
+    
+    salary = get_or_create_salary(employee_id, db)
+    
+    # Calculate components
+    gross_salary, earning_components = calculate_gross_salary(employee_id, db)
+    total_deductions, total_tax, deduction_comps, tax_comps = calculate_deductions_and_tax(employee_id, gross_salary, db)
+    
+    # Calculate net salary
+    net_salary = gross_salary - total_deductions - total_tax
+    
+    # Create payslip
+    ps = Payslip(
+        employee_id=employee_id,
+        month=month,
+        year=year,
+        base_salary=float(salary.base_salary),
+        gross_salary=gross_salary,
+        total_deductions=total_deductions,
+        total_tax=total_tax,
+        net_salary=net_salary,
+        days_worked=days_worked,
+        days_absent=days_absent,
+        status='draft',
+    )
+    db.add(ps)
+    db.commit()
+    db.refresh(ps)
+    
+    # Add payslip components (earnings + deductions + tax)
+    for earning in earning_components:
+        psc = PayslipComponent(
+            payslip_id=ps.id,
+            salary_component_id=None,  # Will be set later if needed
+            component_name=earning['name'],
+            component_type='earning',
+            amount=earning['amount'],
+        )
+        db.add(psc)
+    
+    for deduction in deduction_comps:
+        psc = PayslipComponent(
+            payslip_id=ps.id,
+            salary_component_id=None,
+            component_name=deduction['name'],
+            component_type='deduction',
+            amount=deduction['amount'],
+        )
+        db.add(psc)
+    
+    for tax in tax_comps:
+        psc = PayslipComponent(
+            payslip_id=ps.id,
+            salary_component_id=None,
+            component_name=tax['name'],
+            component_type='tax',
+            amount=tax['amount'],
+        )
+        db.add(psc)
+    
+    db.commit()
+    
+    # Audit log
+    try:
+        db.add(AuditLog(
+            actor_id=None,
+            action='create',
+            object_type='payslip',
+            object_id=ps.id,
+            data=str({'employee_id': employee_id, 'month': month, 'year': year, 'net_salary': net_salary})
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    
+    return ps
+
+
+def get_payslip(payslip_id: str, db: Session) -> Payslip:
+    """Fetch a payslip by ID."""
+    ps = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not ps:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payslip not found')
+    return ps
+
+
+def list_payslips(db: Session, employee_id: str | None = None, month: int | None = None, 
+                  year: int | None = None, page: int = 1, size: int = 20):
+    """List payslips with optional filters."""
+    query = db.query(Payslip)
+    
+    if employee_id:
+        query = query.filter(Payslip.employee_id == employee_id)
+    if month:
+        query = query.filter(Payslip.month == month)
+    if year:
+        query = query.filter(Payslip.year == year)
+    
+    total = query.with_entities(func.count(Payslip.id)).scalar() or 0
+    items = query.order_by(Payslip.created_at.desc()).offset((page - 1) * size).limit(size).all()
+    
+    return items, int(total)
+
+
+def approve_payslip(payslip_id: str, approver_id: str, db: Session) -> Payslip:
+    """Approve a payslip (transition from draft to approved)."""
+    ps = get_payslip(payslip_id, db)
+    
+    if ps.status != 'draft':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payslip is not in draft status')
+    
+    ps.status = 'approved'
+    ps.processed_by = approver_id
+    ps.processed_at = datetime.now()
+    ps.updated_at = datetime.now()
+    
+    db.add(ps)
+    db.commit()
+    db.refresh(ps)
+    
+    # Audit
+    try:
+        db.add(AuditLog(
+            actor_id=approver_id,
+            action='approve',
+            object_type='payslip',
+            object_id=ps.id,
+            data=str({'status': 'approved'})
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    
+    return ps
+
+
+def mark_payslip_paid(payslip_id: str, processor_id: str, db: Session) -> Payslip:
+    """Mark payslip as paid (transition from approved to paid)."""
+    ps = get_payslip(payslip_id, db)
+    
+    if ps.status != 'approved':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payslip must be approved before marking as paid')
+    
+    ps.status = 'paid'
+    ps.updated_at = datetime.now()
+    
+    db.add(ps)
+    db.commit()
+    db.refresh(ps)
+    
+    # Audit
+    try:
+        db.add(AuditLog(
+            actor_id=processor_id,
+            action='mark_paid',
+            object_type='payslip',
+            object_id=ps.id,
+            data=str({'status': 'paid'})
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    
+    return ps
+
+
+def get_payslip_details(payslip_id: str, db: Session) -> dict:
+    """Get full payslip details including components for PDF/email."""
+    ps = get_payslip(payslip_id, db)
+    
+    # Get employee info
+    emp = db.query(Employee).filter(Employee.id == ps.employee_id).first()
+    
+    # Get components
+    components = db.query(PayslipComponent).filter(PayslipComponent.payslip_id == ps.id).all()
+    components_list = [
+        {
+            'component_name': c.component_name,
+            'component_type': c.component_type,
+            'amount': float(c.amount)
+        }
+        for c in components
+    ]
+    
+    return {
+        'id': ps.id,
+        'employee_id': ps.employee_id,
+        'employee_name': emp.name if emp else 'Unknown',
+        'employee_email': emp.user.email if emp and emp.user else None,
+        'month': ps.month,
+        'year': ps.year,
+        'base_salary': float(ps.base_salary),
+        'gross_salary': float(ps.gross_salary),
+        'total_deductions': float(ps.total_deductions),
+        'total_tax': float(ps.total_tax),
+        'net_salary': float(ps.net_salary),
+        'days_worked': ps.days_worked,
+        'days_absent': ps.days_absent,
+        'status': ps.status,
+        'components': components_list,
+        'processed_at': ps.processed_at,
+        'created_at': ps.created_at,
+    }
+
+
+def send_payslip_email(payslip_id: str, db: Session) -> bool:
+    """Generate and send payslip PDF via email."""
+    from app.core.payroll_utils import send_email, generate_payslip_pdf_bytes, generate_payslip_html
+    
+    payslip_data = get_payslip_details(payslip_id, db)
+    
+    if not payslip_data['employee_email']:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee email not found')
+    
+    month_names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    month_name = month_names[payslip_data['month'] - 1]
+    
+    subject = f"Payslip - {month_name} {payslip_data['year']}"
+    
+    # Generate HTML body for email
+    html_body = generate_payslip_html(payslip_data)
+    
+    # Try to generate PDF
+    pdf_bytes = generate_payslip_pdf_bytes(payslip_data)
+    
+    # Save PDF temporarily if generated
+    pdf_path = None
+    if pdf_bytes and not isinstance(pdf_bytes, str):
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as f:
+            f.write(pdf_bytes)
+            pdf_path = f.name
+    
+    # Send email
+    success = send_email(
+        to_email=payslip_data['employee_email'],
+        subject=subject,
+        body=html_body,
+        attachment_path=pdf_path,
+        attachment_name=f"Payslip_{month_name}_{payslip_data['year']}.pdf"
+    )
+    
+    # Clean up temp file
+    if pdf_path:
+        import os
+        try:
+            os.remove(pdf_path)
+        except:
+            pass
+    
+    return success
+
+
+def run_batch_payroll(month: int, year: int, db: Session) -> dict:
+    """Generate payslips for all active employees for a given month/year.
+    Returns summary of processing results."""
+    
+    # Get all active employees
+    employees = db.query(Employee).filter(Employee.is_active.is_(True)).all()
+    
+    if not employees:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='No active employees found')
+    
+    results = {
+        'total_employees': len(employees),
+        'successful': 0,
+        'failed': 0,
+        'already_exists': 0,
+        'errors': []
+    }
+    
+    for emp in employees:
+        try:
+            # Check if payslip already exists
+            existing = db.query(Payslip).filter(
+                Payslip.employee_id == emp.id,
+                Payslip.month == month,
+                Payslip.year == year
+            ).first()
+            
+            if existing:
+                results['already_exists'] += 1
+                continue
+            
+            # Create payslip for this employee
+            ps = create_payslip(
+                employee_id=emp.id,
+                month=month,
+                year=year,
+                db=db
+            )
+            results['successful'] += 1
+            
+        except Exception as e:
+            results['failed'] += 1
+            results['errors'].append({
+                'employee_id': emp.id,
+                'employee_name': emp.name,
+                'error': str(e)
+            })
+    
+    # Log the batch run
+    try:
+        db.add(AuditLog(
+            actor_id=None,
+            action='batch_payroll_run',
+            object_type='payroll_batch',
+            object_id=f'{month}_{year}',
+            data=str({
+                'month': month,
+                'year': year,
+                'successful': results['successful'],
+                'failed': results['failed'],
+                'already_exists': results['already_exists']
+            })
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    
+    return results
+
+
+def create_salary_history_entry(employee_id: str, base_salary: float, grade: str | None, 
+                                effective_from: date, reason: str | None, modified_by_id: str, 
+                                salary_id: str | None = None, db: Session = None) -> SalaryHistory:
+    """Create a salary history entry for audit trail."""
+    history = SalaryHistory(
+        employee_id=employee_id,
+        salary_id=salary_id,
+        base_salary=base_salary,
+        grade=grade,
+        currency='INR',
+        effective_from=effective_from,
+        reason_for_change=reason,
+        modified_by=modified_by_id,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(history)
+    return history
+
+
+def get_salary_history(employee_id: str, db: Session, page: int = 1, size: int = 10) -> dict:
+    """Get salary history for an employee with pagination."""
+    query = db.query(SalaryHistory).filter(SalaryHistory.employee_id == employee_id).order_by(SalaryHistory.effective_from.desc())
+    
+    total = query.count()
+    skip = (page - 1) * size
+    items = query.offset(skip).limit(size).all()
+    
+    return {
+        'items': [
+            {
+                'id': h.id,
+                'base_salary': float(h.base_salary),
+                'grade': h.grade,
+                'currency': h.currency,
+                'effective_from': h.effective_from,
+                'effective_to': h.effective_to,
+                'reason_for_change': h.reason_for_change,
+                'modified_by': h.modified_by_user.email if h.modified_by_user else None,
+                'created_at': h.created_at,
+            }
+            for h in items
+        ],
+        'total': total,
+        'page': page,
+        'size': size,
+    }
+
+
+def update_salary(employee_id: str, new_base_salary: float, grade: str | None, 
+                  effective_from: date, reason: str | None, modified_by_id: str, db: Session) -> Salary:
+    """Update employee salary and create history entry.
+    Marks old salary as inactive and creates new one."""
+    
+    # Validate employee exists
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
+    
+    # Get current active salary
+    current_salary = db.query(Salary).filter(
+        Salary.employee_id == employee_id,
+        Salary.is_active.is_(True)
+    ).first()
+    
+    # Create history entry for old salary if exists
+    if current_salary:
+        create_salary_history_entry(
+            employee_id=employee_id,
+            base_salary=float(current_salary.base_salary),
+            grade=current_salary.grade,
+            effective_from=current_salary.effective_from,
+            reason='Previous salary',
+            modified_by_id=modified_by_id,
+            salary_id=current_salary.id,
+            db=db
+        )
+        
+        # Mark old salary as inactive
+        current_salary.is_active = False
+        current_salary.effective_to = date.today()
+        db.add(current_salary)
+        db.commit()
+    
+    # Create new salary entry
+    new_salary = Salary(
+        employee_id=employee_id,
+        base_salary=new_base_salary,
+        grade=grade,
+        currency='INR',
+        effective_from=effective_from,
+        is_active=True,
+    )
+    db.add(new_salary)
+    db.commit()
+    db.refresh(new_salary)
+    
+    # Create history entry for new salary
+    create_salary_history_entry(
+        employee_id=employee_id,
+        base_salary=new_base_salary,
+        grade=grade,
+        effective_from=effective_from,
+        reason=reason,
+        modified_by_id=modified_by_id,
+        salary_id=new_salary.id,
+        db=db
+    )
+    
+    # Audit log
+    try:
+        db.add(AuditLog(
+            actor_id=modified_by_id,
+            action='update_salary',
+            object_type='salary',
+            object_id=new_salary.id,
+            data=str({
+                'employee_id': employee_id,
+                'old_base_salary': float(current_salary.base_salary) if current_salary else None,
+                'new_base_salary': new_base_salary,
+                'reason': reason
+            })
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    
+    return new_salary
