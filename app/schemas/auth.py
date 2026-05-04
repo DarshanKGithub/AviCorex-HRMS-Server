@@ -15,6 +15,7 @@ class UserPublic(BaseModel):
     email: str
     role: str
     employee_id: str | None = None
+    avatar_url: str | None = None
 
 
 class LoginResponse(BaseModel):
@@ -34,4 +35,12 @@ class ChangePasswordRequest(BaseModel):
 
 
 class PasswordChangeResponse(BaseModel):
+    message: str
+
+
+class AvatarUploadResponse(BaseModel):
+    avatar_url: str
+
+
+class AvatarDeleteResponse(BaseModel):
     message: str

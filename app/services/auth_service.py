@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -17,6 +18,72 @@ SEED_USERS = [
     ('Vikram Rao', 'ceo@hrms.com', 'CEO'),
 ]
 
+AVATAR_DIR = Path(__file__).resolve().parents[2] / 'uploads' / 'avatars'
+MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024
+ALLOWED_AVATAR_CONTENT_TYPES = {'image/png', 'image/jpeg', 'image/webp'}
+
+
+def _ensure_avatar_dir() -> None:
+    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _find_avatar_file(user_id: str) -> Path | None:
+    _ensure_avatar_dir()
+    for file in AVATAR_DIR.glob(f'{user_id}.*'):
+        if file.is_file():
+            return file
+    return None
+
+
+def get_avatar_url(user_id: str) -> str | None:
+    avatar_file = _find_avatar_file(user_id)
+    if avatar_file is None:
+        return None
+    return f'/uploads/avatars/{avatar_file.name}'
+
+
+def save_user_avatar(user_id: str, filename: str, content_type: str | None, content: bytes) -> str:
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Avatar file is empty')
+
+    if len(content) > MAX_AVATAR_SIZE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Avatar must be <= 5MB')
+
+    if content_type and content_type not in ALLOWED_AVATAR_CONTENT_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image type. Use PNG, JPEG or WEBP')
+
+    ext = 'jpg'
+    lower_name = (filename or '').lower()
+    if lower_name.endswith('.png'):
+        ext = 'png'
+    elif lower_name.endswith('.webp'):
+        ext = 'webp'
+    elif lower_name.endswith('.jpeg') or lower_name.endswith('.jpg'):
+        ext = 'jpg'
+    elif content_type == 'image/png':
+        ext = 'png'
+    elif content_type == 'image/webp':
+        ext = 'webp'
+
+    _ensure_avatar_dir()
+
+    # Keep only one avatar per user.
+    existing = _find_avatar_file(user_id)
+    if existing is not None:
+        existing.unlink(missing_ok=True)
+
+    target = AVATAR_DIR / f'{user_id}.{ext}'
+    target.write_bytes(content)
+    return f'/uploads/avatars/{target.name}'
+
+
+def delete_user_avatar(user_id: str) -> bool:
+    existing = _find_avatar_file(user_id)
+    if existing is None:
+        return False
+    existing.unlink(missing_ok=True)
+    return True
+
 
 def to_public_user(user: User, db: Session | None = None) -> UserPublic:
     """Return public user payload including optional linked employee_id (if exists)."""
@@ -29,7 +96,14 @@ def to_public_user(user: User, db: Session | None = None) -> UserPublic:
     except Exception:
         emp_id = None
 
-    return UserPublic(id=user.id, full_name=user.full_name, email=user.email, role=user.role, employee_id=emp_id)
+    return UserPublic(
+        id=user.id,
+        full_name=user.full_name,
+        email=user.email,
+        role=user.role,
+        employee_id=emp_id,
+        avatar_url=get_avatar_url(user.id),
+    )
 
 
 def authenticate_user(*, email: str, password: str, db: Session, role: str | None = None) -> User:

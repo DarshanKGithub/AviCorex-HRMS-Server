@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -7,6 +7,8 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    AvatarDeleteResponse,
+    AvatarUploadResponse,
     PasswordChangeResponse,
     ProfileUpdateRequest,
     UserPublic,
@@ -15,7 +17,9 @@ from app.services.auth_service import (
     authenticate_user,
     change_password,
     create_login_response,
+    delete_user_avatar,
     get_user_from_token,
+    save_user_avatar,
     to_public_user,
     update_user_profile,
 )
@@ -51,6 +55,34 @@ def update_me(
     user = get_user_from_token(credentials.credentials, db=db)
     updated_user = update_user_profile(user, payload.full_name, db=db)
     return to_public_user(updated_user)
+
+
+@router.post('/me/avatar', response_model=AvatarUploadResponse)
+async def upload_me_avatar(
+    avatar: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> AvatarUploadResponse:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+
+    user = get_user_from_token(credentials.credentials, db=db)
+    content = await avatar.read()
+    avatar_url = save_user_avatar(user.id, avatar.filename or '', avatar.content_type, content)
+    return AvatarUploadResponse(avatar_url=avatar_url)
+
+
+@router.delete('/me/avatar', response_model=AvatarDeleteResponse)
+def delete_me_avatar(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> AvatarDeleteResponse:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+
+    user = get_user_from_token(credentials.credentials, db=db)
+    delete_user_avatar(user.id)
+    return AvatarDeleteResponse(message='Avatar removed successfully')
 
 
 @router.post('/change-password', response_model=PasswordChangeResponse)

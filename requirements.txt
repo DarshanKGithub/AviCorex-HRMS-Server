@@ -5,3 +5,4 @@ passlib
 pydantic-settings
 SQLAlchemy
 psycopg[binary]
+python-multipart

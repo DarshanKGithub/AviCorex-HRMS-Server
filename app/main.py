@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.org import router as org_router
@@ -13,6 +15,9 @@ from app.db.database import engine, SessionLocal
 from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
 
 app = FastAPI(title=settings.app_name)
+
+uploads_dir = Path(__file__).resolve().parents[1] / 'uploads'
+uploads_dir.mkdir(parents=True, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,6 +36,7 @@ app.include_router(leave_router, prefix='/leave', tags=['leave'])
 app.include_router(payroll_router, prefix='/payroll', tags=['payroll'])
 from app.api.routes.admin import router as admin_router
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
+app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
 @app.on_event('startup')
