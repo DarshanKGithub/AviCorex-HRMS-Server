@@ -259,6 +259,15 @@ def seed_demo_leave_data(db: Session) -> None:
         ("Casual Leave", "Short-term casual leave", 7),
         ("Sick Leave", "Sick or medical leave", 10),
         ("Paid Leave", "Paid annual leave", 14),
+        ("Loss Of Pay", "Loss of pay leave", 0),
+        ("Comp - Off", "Compensatory off", 3),
+        ("Sabbatical Leave", "Long-term unpaid leave", 30),
+        ("Election Leave", "Leave for voting", 1),
+        ("Unplanned Leave", "Emergency leave", 5),
+        ("Contingency Leave", "Contingency leave", 2),
+        ("Work From Home", "Remote work days", 5),
+        ("Floater Leave", "Flexible leave days", 3),
+        ("Paternity Leave", "Paternity leave", 5),
     ]
     created = False
     for name, desc, days in leave_types:
@@ -288,6 +297,33 @@ def seed_demo_leave_data(db: Session) -> None:
         except Exception:
             continue
 
+    # Seed leave balances for all employees
+    try:
+        employees = db.query(Employee).all()
+        leave_types_obj = db.query(LeaveType).all()
+        current_year = date.today().year
+        
+        for emp in employees:
+            for lt in leave_types_obj:
+                existing_balance = db.query(LeaveBalance).filter(
+                    LeaveBalance.employee_id == emp.id,
+                    LeaveBalance.leave_type_id == lt.id,
+                    LeaveBalance.year == current_year
+                ).first()
+                
+                if not existing_balance:
+                    balance = LeaveBalance(
+                        employee_id=emp.id,
+                        leave_type_id=lt.id,
+                        year=current_year,
+                        granted_days=lt.default_days_per_year,
+                        balance_days=lt.default_days_per_year
+                    )
+                    db.add(balance)
+                    created = True
+    except Exception as e:
+        pass
+
     if created:
         db.commit()
 
@@ -314,6 +350,7 @@ class LeaveBalance(Base):
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
     leave_type_id: Mapped[str] = mapped_column(String(36), ForeignKey('leave_types.id'), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
+    granted_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     balance_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -327,8 +364,13 @@ class LeaveRequest(Base):
     leave_type_id: Mapped[str] = mapped_column(String(36), ForeignKey('leave_types.id'), nullable=False)
     start_date: Mapped[date] = mapped_column(nullable=False)
     end_date: Mapped[date] = mapped_column(nullable=False)
+    session_from: Mapped[str] = mapped_column(String(50), nullable=True, default='Session 1')
+    session_to: Mapped[str] = mapped_column(String(50), nullable=True, default='Session 2')
     days_requested: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(String(1000), nullable=True)
+    contact_details: Mapped[str] = mapped_column(String(500), nullable=True)
+    cc_to: Mapped[str] = mapped_column(String(1000), nullable=True)  # JSON array of emails
+    attachment_paths: Mapped[str] = mapped_column(String(2000), nullable=True)  # JSON array of file paths
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected, cancelled
     approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

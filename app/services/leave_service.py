@@ -1,10 +1,49 @@
 """Services for leave request lifecycle and balance calculations."""
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+import json
 
 from app.db.models import LeaveRequest, LeaveType, LeaveBalance, Employee, AuditLog
+
+# File upload configuration
+LEAVE_UPLOADS_DIR = Path(__file__).resolve().parents[2] / 'uploads' / 'leave_attachments'
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+ALLOWED_FILE_TYPES = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg'}
+
+
+def _ensure_leave_uploads_dir() -> None:
+    LEAVE_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def save_leave_attachment(leave_request_id: str, filename: str, content: bytes) -> str:
+    """Save a file attachment for a leave request. Returns the file path."""
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='File is empty')
+
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='File must be <= 10MB')
+
+    # Extract file extension
+    if '.' not in filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid filename format')
+    
+    ext = filename.rsplit('.', 1)[1].lower()
+    if ext not in ALLOWED_FILE_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'File type .{ext} not allowed')
+
+    _ensure_leave_uploads_dir()
+
+    # Save file with leave request ID in the name to organize by request
+    import uuid
+    unique_id = str(uuid.uuid4())[:8]
+    target_filename = f"{leave_request_id}_{unique_id}.{ext}"
+    target = LEAVE_UPLOADS_DIR / target_filename
+
+    target.write_bytes(content)
+    return f"leave_attachments/{target_filename}"
 
 
 def _days_between(start_date, end_date) -> int:
@@ -28,13 +67,22 @@ def create_leave_request(employee_id: str, payload, db: Session) -> LeaveRequest
 
     days = _days_between(payload.start_date, payload.end_date)
 
+    # Convert cc_to and attachment_paths lists to JSON strings
+    cc_to_json = json.dumps(payload.cc_to) if payload.cc_to else None
+    attachment_paths_json = json.dumps(payload.attachment_paths) if payload.attachment_paths else None
+
     lr = LeaveRequest(
         employee_id=employee_id,
         leave_type_id=payload.leave_type_id,
         start_date=payload.start_date,
         end_date=payload.end_date,
+        session_from=payload.session_from or 'Session 1',
+        session_to=payload.session_to or 'Session 2',
         days_requested=days,
         reason=payload.reason,
+        contact_details=payload.contact_details,
+        cc_to=cc_to_json,
+        attachment_paths=attachment_paths_json,
         status='pending',
     )
     db.add(lr)
@@ -77,7 +125,7 @@ def _get_or_create_balance(employee_id: str, leave_type_id: str, year: int, db: 
     # try to create from LeaveType default
     lt = db.query(LeaveType).filter(LeaveType.id == leave_type_id).first()
     default_days = lt.default_days_per_year if lt else 0
-    bal = LeaveBalance(employee_id=employee_id, leave_type_id=leave_type_id, year=year, balance_days=default_days)
+    bal = LeaveBalance(employee_id=employee_id, leave_type_id=leave_type_id, year=year, granted_days=default_days, balance_days=default_days)
     db.add(bal)
     db.commit()
     db.refresh(bal)

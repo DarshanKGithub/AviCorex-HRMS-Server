@@ -1,7 +1,8 @@
 """API routes for Leave Management (Phase 5)."""
 from datetime import date
+import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -19,11 +20,37 @@ from app.services.leave_service import (
     get_leave_request,
     approve_leave,
     get_leave_balances,
+    save_leave_attachment,
 )
 from app.services.auth_service import get_user_from_token
 
 security = HTTPBearer(auto_error=False)
 router = APIRouter()
+
+
+@router.get('/types', response_model=list)
+def get_leave_types(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """Get all active leave types."""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+
+    user = get_user_from_token(credentials.credentials, db=db)
+    
+    from app.db.models import LeaveType
+    leave_types = db.query(LeaveType).filter(LeaveType.is_active.is_(True)).all()
+    
+    return [
+        {
+            'id': lt.id,
+            'name': lt.name,
+            'description': lt.description,
+            'default_days_per_year': lt.default_days_per_year,
+        }
+        for lt in leave_types
+    ]
 
 
 @router.post('/requests', response_model=LeaveRequestPublic)
@@ -47,8 +74,13 @@ def request_leave_endpoint(
         'leave_type_id': lr.leave_type_id,
         'start_date': lr.start_date,
         'end_date': lr.end_date,
+        'session_from': lr.session_from,
+        'session_to': lr.session_to,
         'days_requested': lr.days_requested,
         'reason': lr.reason,
+        'contact_details': lr.contact_details,
+        'cc_to': lr.cc_to,
+        'attachment_paths': lr.attachment_paths,
         'status': lr.status,
         'approver_id': lr.approver_id,
         'approved_at': lr.approved_at,
@@ -82,8 +114,13 @@ def list_requests_endpoint(
             'leave_type_id': r.leave_type_id,
             'start_date': r.start_date,
             'end_date': r.end_date,
+            'session_from': r.session_from,
+            'session_to': r.session_to,
             'days_requested': r.days_requested,
             'reason': r.reason,
+            'contact_details': r.contact_details,
+            'cc_to': r.cc_to,
+            'attachment_paths': r.attachment_paths,
             'status': r.status,
             'approver_id': r.approver_id,
             'approved_at': r.approved_at,
@@ -116,8 +153,13 @@ def get_request_endpoint(
         'leave_type_id': lr.leave_type_id,
         'start_date': lr.start_date,
         'end_date': lr.end_date,
+        'session_from': lr.session_from,
+        'session_to': lr.session_to,
         'days_requested': lr.days_requested,
         'reason': lr.reason,
+        'contact_details': lr.contact_details,
+        'cc_to': lr.cc_to,
+        'attachment_paths': lr.attachment_paths,
         'status': lr.status,
         'approver_id': lr.approver_id,
         'approved_at': lr.approved_at,
@@ -157,8 +199,13 @@ def approve_request_endpoint(
         'leave_type_id': updated.leave_type_id,
         'start_date': updated.start_date,
         'end_date': updated.end_date,
+        'session_from': updated.session_from,
+        'session_to': updated.session_to,
         'days_requested': updated.days_requested,
         'reason': updated.reason,
+        'contact_details': updated.contact_details,
+        'cc_to': updated.cc_to,
+        'attachment_paths': updated.attachment_paths,
         'status': updated.status,
         'approver_id': updated.approver_id,
         'approved_at': updated.approved_at,
@@ -190,8 +237,69 @@ def balances_endpoint(
             'employee_id': b.employee_id,
             'leave_type_id': b.leave_type_id,
             'year': b.year,
+            'granted_days': b.granted_days,
             'balance_days': b.balance_days,
             'created_at': b.created_at,
             'updated_at': b.updated_at,
         }))
     return out
+
+
+@router.get('/balances/with-details')
+def balances_with_details_endpoint(
+    employee_id: str | None = Query(None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """Get leave balances with leave type details (name, description)."""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+    user = get_user_from_token(credentials.credentials, db=db)
+    if user.role == 'Employee' and employee_id and employee_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees balances')
+
+    if not employee_id:
+        employee_id = user.id
+
+    from app.db.models import LeaveType
+    balances = get_leave_balances(employee_id, db)
+    out = []
+    for b in balances:
+        leave_type = db.query(LeaveType).filter(LeaveType.id == b.leave_type_id).first()
+        out.append({
+            'id': b.id,
+            'employee_id': b.employee_id,
+            'leave_type_id': b.leave_type_id,
+            'leave_type_name': leave_type.name if leave_type else 'Unknown',
+            'year': b.year,
+            'granted_days': b.granted_days,
+            'balance_days': b.balance_days,
+            'created_at': b.created_at.isoformat(),
+            'updated_at': b.updated_at.isoformat(),
+        })
+    return out
+
+
+@router.post('/requests/{request_id}/upload')
+async def upload_leave_attachment(
+    request_id: str,
+    file: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """Upload an attachment file for a leave request."""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+
+    user = get_user_from_token(credentials.credentials, db=db)
+    
+    # Verify the leave request exists and belongs to the user or user is authorized to approve
+    lr = get_leave_request(request_id, db)
+    if user.role == 'Employee' and lr.employee_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot upload files for other employees')
+
+    # Save the file
+    content = await file.read()
+    file_path = save_leave_attachment(request_id, file.filename or 'file', content)
+    
+    return {'file_path': file_path, 'filename': file.filename}
