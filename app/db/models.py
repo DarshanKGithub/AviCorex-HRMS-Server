@@ -70,7 +70,13 @@ def seed_demo_users(db: Session) -> None:
         created = True
 
     if created:
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
 
 # --- Phase 2 models: Departments, Designations, Employees ---

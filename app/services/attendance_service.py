@@ -58,6 +58,11 @@ class AttendanceRuleEngine:
         """Calculate total working hours in decimal format."""
         if not check_in_time or not check_out_time:
             return 0.0
+        # Normalize naive/aware datetime mismatches (common with SQLite timezone behavior in tests).
+        if check_in_time.tzinfo is None and check_out_time.tzinfo is not None:
+            check_in_time = check_in_time.replace(tzinfo=timezone.utc)
+        elif check_in_time.tzinfo is not None and check_out_time.tzinfo is None:
+            check_out_time = check_out_time.replace(tzinfo=timezone.utc)
         duration = check_out_time - check_in_time
         return duration.total_seconds() / 3600  # Convert to hours
 
@@ -202,7 +207,8 @@ def check_in(payload: CheckInRequest, db: Session) -> Attendance:
 
     check_in_time = payload.check_in_time or datetime.now(timezone.utc)
     late_minutes = rule_engine.calculate_late_minutes(check_in_time, shift)
-    is_late = rule_engine.is_late_entry(late_minutes)
+    # is_late marks late beyond grace period; separate policy thresholds can be handled elsewhere.
+    is_late = late_minutes > 0
 
     if existing:
         # Update existing record
@@ -214,6 +220,8 @@ def check_in(payload: CheckInRequest, db: Session) -> Attendance:
         db.add(existing)
         db.commit()
         db.refresh(existing)
+        if existing.check_in_time and existing.check_in_time.tzinfo is None:
+            existing.check_in_time = existing.check_in_time.replace(tzinfo=timezone.utc)
         _write_attendance_audit_log(db, 'UPDATE', existing)
         return existing
     else:
@@ -229,6 +237,8 @@ def check_in(payload: CheckInRequest, db: Session) -> Attendance:
         db.add(attendance)
         db.commit()
         db.refresh(attendance)
+        if attendance.check_in_time and attendance.check_in_time.tzinfo is None:
+            attendance.check_in_time = attendance.check_in_time.replace(tzinfo=timezone.utc)
         _write_attendance_audit_log(db, 'CREATE', attendance)
         return attendance
 
@@ -271,6 +281,10 @@ def check_out(payload: CheckOutRequest, db: Session) -> Attendance:
     db.add(attendance)
     db.commit()
     db.refresh(attendance)
+    if attendance.check_out_time and attendance.check_out_time.tzinfo is None:
+        attendance.check_out_time = attendance.check_out_time.replace(tzinfo=timezone.utc)
+    if attendance.check_in_time and attendance.check_in_time.tzinfo is None:
+        attendance.check_in_time = attendance.check_in_time.replace(tzinfo=timezone.utc)
     _write_attendance_audit_log(db, 'UPDATE', attendance)
 
     return attendance

@@ -97,7 +97,10 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
     if payload.manager_id is not None:
         # manager must exist
         if payload.manager_id == emp.id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee cannot be their own manager')
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Manager assignment would create a cycle (self-manager not allowed)',
+            )
 
         mgr = None
         if payload.manager_id:
@@ -132,7 +135,7 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
     return emp
 
 
-def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) -> None:
+def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) -> Employee:
     emp = get_employee(employee_id, db)
     try:
         # record audit before delete
@@ -142,6 +145,8 @@ def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) 
         db.commit()
     except Exception:
         db.rollback()
+        raise
+    return emp
 
 
 def get_manager_chain(employee_id: str, db: Session) -> List[dict]:

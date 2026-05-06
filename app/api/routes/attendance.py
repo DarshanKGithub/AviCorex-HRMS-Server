@@ -3,10 +3,11 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.rbac import get_current_user, has_permission, require_permissions
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.attendance import (
     ShiftCreate,
     ShiftPublic,
@@ -39,9 +40,6 @@ from app.services.attendance_service import (
     delete_attendance,
     get_employee_attendance_summary,
 )
-from app.services.auth_service import get_user_from_token
-
-security = HTTPBearer(auto_error=False)
 router = APIRouter()
 
 
@@ -69,17 +67,10 @@ def _attendance_to_dict(a) -> dict:
 @router.post('/shifts', response_model=ShiftPublic)
 def create_shift_endpoint(
     payload: ShiftCreate,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('manage_shifts')),
     db: Session = Depends(get_db),
 ) -> ShiftPublic:
     """Create a new shift (Admin/HR only)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
-
     shift = create_shift(payload, db)
     return ShiftPublic.model_validate(shift)
 
@@ -87,14 +78,10 @@ def create_shift_endpoint(
 @router.get('/shifts/{shift_id}', response_model=ShiftPublic)
 def get_shift_endpoint(
     shift_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ShiftPublic:
     """Retrieve a shift by ID."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    get_user_from_token(credentials.credentials, db=db)
     shift = get_shift(shift_id, db)
     return ShiftPublic.model_validate(shift)
 
@@ -103,14 +90,10 @@ def get_shift_endpoint(
 def list_shifts_endpoint(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedShifts:
     """List all shifts with pagination."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    get_user_from_token(credentials.credentials, db=db)
     shifts, total = list_shifts(db, page=page, size=size)
     return PaginatedShifts(
         items=[ShiftPublic.model_validate(s) for s in shifts],
@@ -127,17 +110,10 @@ def list_shifts_endpoint(
 def assign_shift_endpoint(
     employee_id: str,
     payload: EmployeeShiftAssignmentCreate,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('manage_shifts')),
     db: Session = Depends(get_db),
 ) -> EmployeeShiftAssignmentPublic:
     """Assign a shift to an employee (Admin/HR only)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
-
     # Ensure employee_id matches payload
     if payload.employee_id != employee_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee ID mismatch')
@@ -151,14 +127,10 @@ def list_employee_shift_assignments_endpoint(
     employee_id: str,
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedEmployeeShiftAssignments:
     """List shift assignments for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    get_user_from_token(credentials.credentials, db=db)
     assignments, total = list_employee_shift_assignments(db, employee_id=employee_id, page=page, size=size)
     return PaginatedEmployeeShiftAssignments(
         items=[EmployeeShiftAssignmentPublic.model_validate(a) for a in assignments],
@@ -174,16 +146,12 @@ def list_employee_shift_assignments_endpoint(
 @router.post('/check-in', response_model=AttendancePublic)
 def check_in_endpoint(
     payload: CheckInRequest,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Record check-in for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    # Allow employees to check in for themselves, and admins/managers for others
-    if user.role == 'Employee' and payload.employee_id != user.id:
+    # Allow self check-in for employees/workers. Others require elevated attendance permission.
+    if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot check in for other employees')
 
     attendance = check_in(payload, db)
@@ -193,16 +161,12 @@ def check_in_endpoint(
 @router.post('/check-out', response_model=AttendancePublic)
 def check_out_endpoint(
     payload: CheckOutRequest,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Record check-out for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    # Allow employees to check out for themselves, and admins/managers for others
-    if user.role == 'Employee' and payload.employee_id != user.id:
+    # Allow self check-out for employees/workers. Others require elevated attendance permission.
+    if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot check out for other employees')
 
     attendance = check_out(payload, db)
@@ -216,18 +180,16 @@ def list_attendance_endpoint(
     end_date: date | None = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedAttendance:
     """List attendance records with optional filters."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-
-    # Employees can only view their own attendance
-    if user.role == 'Employee' and employee_id and employee_id != user.id:
+    # Non-elevated users can only view their own attendance.
+    if employee_id and employee_id != user.id and not has_permission(user.role, 'view_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees attendance')
+
+    if not employee_id and not has_permission(user.role, 'view_attendance'):
+        employee_id = user.id
 
     records, total = list_attendance(db, employee_id=employee_id, start_date=start_date, end_date=end_date, page=page, size=size)
     return PaginatedAttendance(
@@ -243,17 +205,11 @@ def get_attendance_summary_endpoint(
     employee_id: str,
     start_date: date = Query(...),
     end_date: date = Query(...),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EmployeeAttendanceSummary:
     """Get attendance summary for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-
-    # Employees can only view their own summary
-    if user.role == 'Employee' and employee_id != user.id:
+    if employee_id != user.id and not has_permission(user.role, 'view_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees attendance')
 
     if start_date > end_date:
@@ -265,31 +221,22 @@ def get_attendance_summary_endpoint(
 @router.get('/{attendance_id}', response_model=AttendancePublic)
 def get_attendance_endpoint(
     attendance_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Retrieve an attendance record by ID."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    get_user_from_token(credentials.credentials, db=db)
     attendance = get_attendance(attendance_id, db)
+    if attendance.employee_id != user.id and not has_permission(user.role, 'view_attendance'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees attendance')
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 
 @router.delete('/{attendance_id}', response_model=AttendancePublic)
 def delete_attendance_endpoint(
     attendance_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('manage_attendance_records')),
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Delete an attendance record (Admin/HR only)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
-
     attendance = delete_attendance(attendance_id, db)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))

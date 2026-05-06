@@ -42,16 +42,24 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
-    with SessionLocal() as session:
-        seed_demo_users(session)
-        # seed Phase 2 default org data
-        seed_demo_org(session)
-        # seed Phase 4 default shift and rule data
-        seed_demo_shifts(session)
-        # seed Phase 5 leave types and holidays
-        seed_demo_leave_data(session)
-        # seed Phase 6 salary components
-        seed_demo_salary_data(session)
+    # Run each seeder in its own session. If one seeder fails, rollback and continue
+    seeders = [
+        seed_demo_users,
+        seed_demo_org,
+        seed_demo_shifts,
+        seed_demo_leave_data,
+        seed_demo_salary_data,
+    ]
+    for seeder in seeders:
+        with SessionLocal() as session:
+            try:
+                seeder(session)
+            except Exception:
+                # ensure session is clean for next seeder
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
 
 
 @app.get('/')

@@ -3,10 +3,11 @@ from datetime import date
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.rbac import get_current_user, has_permission
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.leave import (
     LeaveRequestCreate,
     LeaveRequestPublic,
@@ -22,23 +23,15 @@ from app.services.leave_service import (
     get_leave_balances,
     save_leave_attachment,
 )
-from app.services.auth_service import get_user_from_token
-
-security = HTTPBearer(auto_error=False)
 router = APIRouter()
 
 
 @router.get('/types', response_model=list)
 def get_leave_types(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get all active leave types."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
     from app.db.models import LeaveType
     leave_types = db.query(LeaveType).filter(LeaveType.is_active.is_(True)).all()
     
@@ -56,13 +49,9 @@ def get_leave_types(
 @router.post('/requests', response_model=LeaveRequestPublic)
 def request_leave_endpoint(
     payload: LeaveRequestCreate,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LeaveRequestPublic:
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
     # user.id is user.id; map to employee id: login returns employee_id in user payload when available
     employee_id = getattr(user, 'id', None)
     # If user has employee mapping in DB, use that; otherwise assume user.id equals employee.id (demo)
@@ -95,16 +84,14 @@ def list_requests_endpoint(
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedLeaveRequests:
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    # Employees may only list their own unless Admin/HR
-    if user.role == 'Employee' and employee_id and employee_id != user.id:
+    if employee_id and employee_id != user.id and not has_permission(user.role, 'view_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees requests')
+
+    if not employee_id and not has_permission(user.role, 'view_leave'):
+        employee_id = user.id
 
     items, total = list_leave_requests(db, employee_id=employee_id, status_filter=status, page=page, size=size)
     return PaginatedLeaveRequests(
@@ -136,15 +123,11 @@ def list_requests_endpoint(
 @router.get('/requests/{request_id}', response_model=LeaveRequestPublic)
 def get_request_endpoint(
     request_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
     lr = get_leave_request(request_id, db)
-    if user.role == 'Employee' and lr.employee_id != user.id:
+    if lr.employee_id != user.id and not has_permission(user.role, 'view_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees requests')
 
     return LeaveRequestPublic.model_validate({
@@ -172,15 +155,10 @@ def get_request_endpoint(
 def approve_request_endpoint(
     request_id: str,
     payload: ApprovePayload,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    # Only Manager/HR/Admin can approve
-    if user.role not in ['Admin', 'HR', 'Manager']:
+    if not has_permission(user.role, 'approve_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
 
     # For Manager role, ensure they are manager of the employee
@@ -217,13 +195,10 @@ def approve_request_endpoint(
 @router.get('/balances', response_model=list[LeaveBalancePublic])
 def balances_endpoint(
     employee_id: str | None = Query(None),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role == 'Employee' and employee_id and employee_id != user.id:
+    if employee_id and employee_id != user.id and not has_permission(user.role, 'view_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees balances')
 
     if not employee_id:
@@ -248,14 +223,11 @@ def balances_endpoint(
 @router.get('/balances/with-details')
 def balances_with_details_endpoint(
     employee_id: str | None = Query(None),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get leave balances with leave type details (name, description)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role == 'Employee' and employee_id and employee_id != user.id:
+    if employee_id and employee_id != user.id and not has_permission(user.role, 'view_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees balances')
 
     if not employee_id:
@@ -284,18 +256,13 @@ def balances_with_details_endpoint(
 async def upload_leave_attachment(
     request_id: str,
     file: UploadFile = File(...),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Upload an attachment file for a leave request."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
     # Verify the leave request exists and belongs to the user or user is authorized to approve
     lr = get_leave_request(request_id, db)
-    if user.role == 'Employee' and lr.employee_id != user.id:
+    if lr.employee_id != user.id and not has_permission(user.role, 'approve_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot upload files for other employees')
 
     # Save the file

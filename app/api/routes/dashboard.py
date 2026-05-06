@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.schemas.dashboard import DashboardSummaryResponse
-from app.services.auth_service import get_user_from_token
+from app.services.auth_service import decode_token_payload
 from app.services.dashboard_service import get_dashboard_summary
 
 security = HTTPBearer(auto_error=False)
@@ -28,8 +28,8 @@ def summary(
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='start_date must be before end_date')
 
-    # Auth check; response shape can be used by role-aware frontend widgets.
-    get_user_from_token(credentials.credentials, db=db)
+    # Auth check only; dashboard currently allows all authenticated roles.
+    decode_token_payload(credentials.credentials)
 
     return get_dashboard_summary(
         db=db,

@@ -44,3 +44,12 @@ class AvatarUploadResponse(BaseModel):
 
 class AvatarDeleteResponse(BaseModel):
     message: str
+
+
+class PermissionsResponse(BaseModel):
+    role: str
+    permissions: list[str]
+
+
+class RoleUpdateRequest(BaseModel):
+    role: str = Field(min_length=2, max_length=50)

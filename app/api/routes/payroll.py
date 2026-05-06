@@ -3,10 +3,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.rbac import get_current_user, has_permission, require_permissions
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.payroll import (
     SalaryPublic,
     PayslipPublic,
@@ -31,30 +32,22 @@ from app.services.payroll_service import (
     get_salary_history,
     update_salary,
 )
-from app.services.auth_service import get_user_from_token
-
-security = HTTPBearer(auto_error=False)
 router = APIRouter()
 
 
 @router.get('/salary', response_model=SalaryPublic)
 def get_salary_endpoint(
     employee_id: str | None = Query(None),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SalaryPublic:
     """Get salary details for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
     # Default to requesting user's own salary
     if not employee_id:
         employee_id = user.id
     
     # Employees can only view their own salary unless Admin/HR
-    if user.role == 'Employee' and employee_id != user.id:
+    if employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees salary')
     
     sal = get_or_create_salary(employee_id, db)
@@ -75,19 +68,10 @@ def get_salary_endpoint(
 @router.post('/payslips', response_model=PayslipPublic)
 def create_payslip_endpoint(
     payload: PayslipCreate,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db),
 ) -> PayslipPublic:
     """Generate a payslip for an employee (auto-calculates days_worked from attendance)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Only HR/Admin can create payslips
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only HR/Admin can create payslips')
-    
     # Auto-calculate days_worked and days_absent from attendance records
     ps = create_payslip(
         employee_id=payload.employee_id,
@@ -123,20 +107,14 @@ def list_payslips_endpoint(
     year: int | None = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedPayslips:
     """List payslips with optional filters."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Employees can only view their own payslips
-    if user.role == 'Employee' and employee_id and employee_id != user.id:
+    if employee_id and employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees payslips')
-    
-    if user.role == 'Employee' and not employee_id:
+
+    if not employee_id and not has_permission(user.role, 'view_payroll'):
         employee_id = user.id
     
     items, total = list_payslips(db, employee_id=employee_id, month=month, year=year, page=page, size=size)
@@ -169,18 +147,14 @@ def list_payslips_endpoint(
 @router.get('/payslips/{payslip_id}', response_model=PayslipDetailPublic)
 def get_payslip_endpoint(
     payslip_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get detailed payslip with components breakdown."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
     ps = get_payslip(payslip_id, db)
     
     # Employees can only view their own payslips
-    if user.role == 'Employee' and ps.employee_id != user.id:
+    if ps.employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees payslips')
     
     # Get components
@@ -218,17 +192,11 @@ def get_payslip_endpoint(
 @router.post('/payslips/{payslip_id}/approve', response_model=PayslipPublic)
 def approve_payslip_endpoint(
     payslip_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Approve a payslip (HR/Admin only)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Only HR/Admin/Manager can approve
-    if user.role not in ['Admin', 'HR', 'Manager']:
+    if not has_permission(user.role, 'approve_leave') and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
     
     ps = approve_payslip(payslip_id, user.id, db)
@@ -256,18 +224,10 @@ def approve_payslip_endpoint(
 @router.post('/payslips/{payslip_id}/mark-paid', response_model=PayslipPublic)
 def mark_paid_endpoint(
     payslip_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db),
 ):
     """Mark payslip as paid (HR/Admin only)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only HR/Admin can mark payslips as paid')
-    
     ps = mark_payslip_paid(payslip_id, user.id, db)
     
     return PayslipPublic.model_validate({
@@ -293,18 +253,14 @@ def mark_paid_endpoint(
 @router.get('/payslips/{payslip_id}/pdf')
 def download_payslip_pdf(
     payslip_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Download payslip as PDF."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
     ps = get_payslip(payslip_id, db)
     
     # Permission check: Employee can only download their own, others need Admin/HR role
-    if user.role == 'Employee' and ps.employee_id != user.id:
+    if ps.employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not authorized to download this payslip')
     
     # Get payslip details
@@ -331,19 +287,10 @@ def download_payslip_pdf(
 @router.post('/payslips/{payslip_id}/send-email')
 def send_payslip_email_endpoint(
     payslip_id: str,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db),
 ) -> dict:
     """Send payslip via email to employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Only HR/Admin can send payslips
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only HR/Admin can send payslips via email')
-    
     try:
         success = send_payslip_email(payslip_id, db)
         if success:
@@ -359,19 +306,10 @@ def send_payslip_email_endpoint(
 @router.post('/runs', response_model=BatchPayrollResult)
 def run_batch_payroll_endpoint(
     payload: BatchPayrollRequest,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    _user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db),
 ) -> BatchPayrollResult:
     """Run batch payroll for all active employees for a given month/year."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Only Admin/HR can run batch payroll
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only Admin/HR can run batch payroll')
-    
     # Validate month and year
     if payload.month < 1 or payload.month > 12:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid month (must be 1-12)')
@@ -389,21 +327,16 @@ def get_salary_history_endpoint(
     employee_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SalaryHistoryResponse:
     """Get salary history for an employee."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
     # Default to requesting user's own history
     if not employee_id:
         employee_id = user.id
     
     # Permission check: Employee can only view their own, others need Admin/HR role
-    if user.role == 'Employee' and employee_id != user.id:
+    if employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not authorized to view this salary history')
     
     result = get_salary_history(employee_id, db, page=page, size=size)
@@ -415,19 +348,10 @@ def get_salary_history_endpoint(
 def update_salary_endpoint(
     payload: UpdateSalaryRequest,
     employee_id: str = Query(...),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db),
 ) -> SalaryPublic:
     """Update employee salary (create new salary entry and mark old as inactive)."""
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    
-    # Only Admin/HR can update salaries
-    if user.role not in ['Admin', 'HR']:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only Admin/HR can update salaries')
-    
     # Update salary and create history entry
     new_salary = update_salary(
         employee_id=employee_id,

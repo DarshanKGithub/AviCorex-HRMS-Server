@@ -1,14 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.rbac import require_permissions
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.employee import EmployeeCreate, EmployeePublic, EmployeeUpdate, PaginatedEmployees
-from app.services.employee_service import list_employees, search_employees, create_employee, get_employee, update_employee, delete_employee
+from app.services.employee_service import search_employees, create_employee, get_employee, update_employee, delete_employee
 from app.services.employee_service import get_manager_chain
-from app.services.auth_service import get_user_from_token
-
-security = HTTPBearer(auto_error=False)
 
 router = APIRouter()
 
@@ -34,13 +32,11 @@ def employees(page: int = 1, size: int = 20, q: str | None = None, department_id
 
 
 @router.post('/', response_model=EmployeePublic)
-def create(payload: EmployeeCreate, credentials: HTTPAuthorizationCredentials | None = Depends(security), db: Session = Depends(get_db)):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ('Admin', 'HR'):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+def create(
+    payload: EmployeeCreate,
+    user: User = Depends(require_permissions('create_employee')),
+    db: Session = Depends(get_db),
+):
 
     e = create_employee(payload=payload, db=db, actor_id=user.id)
     return EmployeePublic(
@@ -69,13 +65,12 @@ def get_one(employee_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch('/{employee_id}', response_model=EmployeePublic)
-def patch(employee_id: str, payload: EmployeeUpdate, credentials: HTTPAuthorizationCredentials | None = Depends(security), db: Session = Depends(get_db)):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ('Admin', 'HR'):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+def patch(
+    employee_id: str,
+    payload: EmployeeUpdate,
+    user: User = Depends(require_permissions('edit_employee')),
+    db: Session = Depends(get_db),
+):
 
     e = update_employee(employee_id, payload=payload, db=db, actor_id=user.id)
     return EmployeePublic(
@@ -90,13 +85,7 @@ def patch(employee_id: str, payload: EmployeeUpdate, credentials: HTTPAuthorizat
 
 
 @router.delete('/{employee_id}')
-def remove(employee_id: str, credentials: HTTPAuthorizationCredentials | None = Depends(security), db: Session = Depends(get_db)):
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
-
-    user = get_user_from_token(credentials.credentials, db=db)
-    if user.role not in ('Admin', 'HR'):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+def remove(employee_id: str, user: User = Depends(require_permissions('delete_employee')), db: Session = Depends(get_db)):
 
     delete_employee(employee_id, db=db, actor_id=user.id)
     return {'detail': 'deleted'}
