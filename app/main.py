@@ -35,7 +35,10 @@ app.include_router(attendance_router, prefix='/attendance', tags=['attendance'])
 app.include_router(leave_router, prefix='/leave', tags=['leave'])
 app.include_router(payroll_router, prefix='/payroll', tags=['payroll'])
 from app.api.routes.admin import router as admin_router
+from app.api.routes.advanced_attendance import router as adv_attendance_router
+
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
+app.include_router(adv_attendance_router, prefix='/advanced-attendance', tags=['advanced_attendance'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 

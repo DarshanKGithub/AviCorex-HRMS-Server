@@ -197,6 +197,12 @@ class Attendance(Base):
     is_half_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_work_from_home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
+    # Location Tracking (Geo-Fencing)
+    check_in_latitude: Mapped[float] = mapped_column(Numeric(10, 8), nullable=True)
+    check_in_longitude: Mapped[float] = mapped_column(Numeric(11, 8), nullable=True)
+    check_out_latitude: Mapped[float] = mapped_column(Numeric(10, 8), nullable=True)
+    check_out_longitude: Mapped[float] = mapped_column(Numeric(11, 8), nullable=True)
+    location_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -520,3 +526,105 @@ def seed_demo_salary_data(db: Session) -> None:
 
     if created:
         db.commit()
+
+
+# --- Phase 7 models: Advanced Attendance & Time Tracking ---
+
+class Timesheet(Base):
+    __tablename__ = 'timesheets'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    task_description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    hours_worked: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Draft') # Draft, Submitted, Approved, Rejected
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class OvertimeRequest(Base):
+    __tablename__ = 'overtime_requests'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    attendance_id: Mapped[str] = mapped_column(String(36), ForeignKey('attendance.id'), nullable=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    hours: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending') # Pending, Approved, Rejected
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class AttendanceRegularization(Base):
+    __tablename__ = 'attendance_regularizations'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    attendance_id: Mapped[str] = mapped_column(String(36), ForeignKey('attendance.id'), nullable=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    requested_check_in: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_check_out: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending') # Pending, Approved, Rejected
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class CompOffRequest(Base):
+    __tablename__ = 'comp_off_requests'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    worked_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=True)
+    leave_balance_id: Mapped[str] = mapped_column(String(36), ForeignKey('leave_balances.id'), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending') # Pending, Approved, Rejected
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class BiometricDevice(Base):
+    __tablename__ = 'biometric_devices'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    device_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    location: Mapped[str] = mapped_column(String(255), nullable=True)
+    ip_address: Mapped[str] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Active')
+    last_sync_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class BiometricLog(Base):
+    __tablename__ = 'biometric_logs'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    device_id: Mapped[str] = mapped_column(String(36), ForeignKey('biometric_devices.id'), nullable=False)
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    log_type: Mapped[str] = mapped_column(String(20), nullable=False) # In, Out
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Unprocessed') # Unprocessed, Processed, Error
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Roster(Base):
+    __tablename__ = 'rosters'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class RosterEntry(Base):
+    __tablename__ = 'roster_entries'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    roster_id: Mapped[str] = mapped_column(String(36), ForeignKey('rosters.id'), nullable=False, index=True)
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    shift_id: Mapped[str] = mapped_column(String(36), ForeignKey('shifts.id'), nullable=True)
+    is_off_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
