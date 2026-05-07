@@ -1,30 +1,85 @@
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Literal, Optional
+from datetime import date
 
 
 class EmployeeCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=120)
     email: str
-    department_id: str | None = None
-    designation_id: str | None = None
-    manager_id: str | None = None
+    phone: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = None
+    personal_email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    pan_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    department_id: Optional[str] = None
+    designation_id: Optional[str] = None
+    manager_id: Optional[str] = None
+    joining_date: Optional[date] = None
+    date_of_confirmation: Optional[date] = None
 
 
 class EmployeeUpdate(BaseModel):
-    full_name: str | None = None
-    department_id: str | None = None
-    designation_id: str | None = None
-    manager_id: str | None = None
-    is_active: bool | None = None
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = None
+    personal_email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    pan_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    department_id: Optional[str] = None
+    designation_id: Optional[str] = None
+    manager_id: Optional[str] = None
+    joining_date: Optional[date] = None
+    date_of_confirmation: Optional[date] = None
+    is_active: Optional[bool] = None
 
 
 class EmployeePublic(BaseModel):
     id: str
     full_name: str
     email: str
-    department_id: str | None = None
-    designation_id: str | None = None
-    manager_id: str | None = None
+    phone: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = None
+    personal_email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    pan_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    department_id: Optional[str] = None
+    designation_id: Optional[str] = None
+    manager_id: Optional[str] = None
+    joining_date: Optional[date] = None
+    date_of_confirmation: Optional[date] = None
     is_active: bool
 
 

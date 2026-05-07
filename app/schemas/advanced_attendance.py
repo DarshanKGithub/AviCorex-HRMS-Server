@@ -164,3 +164,24 @@ class PaginatedAttendanceRegularizations(BaseModel):
     total: int
     page: int
     size: int
+
+
+class PaginatedTimesheets(BaseModel):
+    items: List[TimesheetPublic]
+    total: int
+    page: int
+    size: int
+
+
+class PaginatedOvertimeRequests(BaseModel):
+    items: List[OvertimeRequestPublic]
+    total: int
+    page: int
+    size: int
+
+
+class PaginatedCompOffRequests(BaseModel):
+    items: List[CompOffRequestPublic]
+    total: int
+    page: int
+    size: int

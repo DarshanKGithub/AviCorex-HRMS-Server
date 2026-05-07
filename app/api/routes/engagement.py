@@ -14,12 +14,25 @@ from app.schemas.engagement import (
     AnnouncementPublic,
     PaginatedAnnouncements
 )
+from app.schemas.grievance import (
+    EmployeeGrievanceCreate,
+    EmployeeGrievancePublic,
+    PaginatedEmployeeGrievances,
+    EmployeeGrievanceStatusUpdate
+)
 from app.services.engagement_service import (
     create_ticket,
     get_tickets,
     update_ticket_status,
     create_announcement,
     get_announcements
+)
+from app.services.grievance_service import (
+    create_grievance,
+    get_grievances,
+    get_all_grievances,
+    get_grievance,
+    update_grievance_status
 )
 
 router = APIRouter()
@@ -156,3 +169,80 @@ def list_active_announcements(
         page=page,
         size=size
     )
+
+
+# --- Grievance Routes ---
+
+@router.post('/grievances', response_model=EmployeeGrievancePublic)
+def file_grievance(
+    payload: EmployeeGrievanceCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """File a new employee grievance"""
+    grievance = create_grievance(payload, user.id, db)
+    return EmployeeGrievancePublic.model_validate(grievance)
+
+
+@router.get('/grievances', response_model=PaginatedEmployeeGrievances)
+def list_grievances(
+    employee_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List grievances (own or all if admin)"""
+    if has_permission(user.role, 'manage_grievances'):
+        # Admin/HR can view all grievances
+        items, total = get_all_grievances(db, status_filter=status, page=page, size=size)
+    else:
+        # Employees can only see their own grievances
+        items, total = get_grievances(
+            db,
+            employee_id=user.id,
+            status_filter=status,
+            page=page,
+            size=size
+        )
+    
+    return PaginatedEmployeeGrievances(
+        items=[EmployeeGrievancePublic.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        size=size
+    )
+
+
+@router.get('/grievances/{grievance_id}', response_model=EmployeeGrievancePublic)
+def get_grievance_detail(
+    grievance_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get grievance details"""
+    grievance = get_grievance(db, grievance_id)
+    if not grievance:
+        raise HTTPException(status_code=404, detail='Grievance not found')
+    
+    # Check permission
+    if grievance.employee_id != user.id and not has_permission(user.role, 'manage_grievances'):
+        raise HTTPException(status_code=403, detail='Cannot access this grievance')
+    
+    return EmployeeGrievancePublic.model_validate(grievance)
+
+
+@router.put('/grievances/{grievance_id}/status', response_model=EmployeeGrievancePublic)
+def update_grievance_status_endpoint(
+    grievance_id: str,
+    payload: EmployeeGrievanceStatusUpdate,
+    user: User = Depends(require_permissions('manage_grievances')),
+    db: Session = Depends(get_db)
+):
+    """Update grievance status (admin only)"""
+    grievance = update_grievance_status(grievance_id, payload, db)
+    if not grievance:
+        raise HTTPException(status_code=404, detail='Grievance not found')
+    
+    return EmployeeGrievancePublic.model_validate(grievance)
