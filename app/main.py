@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from sqlalchemy import text
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.org import router as org_router
@@ -47,6 +48,7 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_attendance_columns()
     # Run each seeder in its own session. If one seeder fails, rollback and continue
     seeders = [
         seed_demo_users,
@@ -65,6 +67,36 @@ def startup() -> None:
                     session.rollback()
                 except Exception:
                     pass
+
+
+def _ensure_attendance_columns() -> None:
+    """Backfill older databases that were created before attendance geo columns existed."""
+    required_columns = {
+        'check_in_latitude': 'NUMERIC(10, 8)',
+        'check_in_longitude': 'NUMERIC(11, 8)',
+        'check_out_latitude': 'NUMERIC(10, 8)',
+        'check_out_longitude': 'NUMERIC(11, 8)',
+        'location_verified': 'BOOLEAN NOT NULL DEFAULT FALSE',
+    }
+
+    with engine.begin() as conn:
+        existing = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'attendance'
+                    """
+                )
+            )
+        }
+
+        for column_name, sql_type in required_columns.items():
+            if column_name in existing:
+                continue
+            conn.execute(text(f"ALTER TABLE attendance ADD COLUMN {column_name} {sql_type}"))
 
 
 @app.get('/')

@@ -40,6 +40,13 @@ from app.services.attendance_service import (
     delete_attendance,
     get_employee_attendance_summary,
 )
+from fastapi.responses import StreamingResponse
+import io
+import csv
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
 router = APIRouter()
 
 
@@ -240,3 +247,80 @@ def delete_attendance_endpoint(
     """Delete an attendance record (Admin/HR only)."""
     attendance = delete_attendance(attendance_id, db)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
+
+
+@router.get('/export', responses={200: {'content': {'text/csv': {}}}})
+def export_attendance_endpoint(
+    employee_id: str,
+    month: int = Query(..., ge=1, le=12),
+    year: int = Query(..., ge=2000),
+    fmt: str = Query('csv'),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export monthly attendance for an employee. Supports CSV and XLSX (if openpyxl installed)."""
+    if employee_id != user.id and not has_permission(user.role, 'view_attendance'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot export other employee reports')
+
+    # build start and end dates for month
+    from calendar import monthrange
+    start_date = date(year, month, 1)
+    end_date = date(year, month, monthrange(year, month)[1])
+
+    summary = get_employee_attendance_summary(employee_id, start_date, end_date, db)
+
+    filename = f"Attendance_{summary.employee_id}_{start_date.strftime('%B%Y')}"
+
+    if fmt == 'xlsx' and openpyxl is not None:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Attendance'
+        headers = ['Date', 'Status', 'Check In', 'Check Out', 'Hours', 'Is Late', 'Is Half Day']
+        ws.append(headers)
+        for r in summary.records:
+            hours = 0
+            if r.check_in_time and r.check_out_time:
+                try:
+                    delta = r.check_out_time - r.check_in_time
+                    hours = round(delta.total_seconds() / 3600, 2)
+                except Exception:
+                    hours = 0
+            ws.append([
+                r.date.isoformat(),
+                r.status,
+                getattr(r.check_in_time, 'isoformat', lambda: '')() if r.check_in_time else '',
+                getattr(r.check_out_time, 'isoformat', lambda: '')() if r.check_out_time else '',
+                hours,
+                'Yes' if r.is_late else 'No',
+                'Yes' if r.is_half_day else 'No',
+            ])
+        stream = io.BytesIO()
+        wb.save(stream)
+        stream.seek(0)
+        return StreamingResponse(stream, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={
+            'Content-Disposition': f'attachment; filename="{filename}.xlsx"'
+        })
+
+    # default CSV
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['Date', 'Status', 'Check In', 'Check Out', 'Hours', 'Is Late', 'Is Half Day'])
+    for r in summary.records:
+        hours = 0
+        if r.check_in_time and r.check_out_time:
+            try:
+                delta = r.check_out_time - r.check_in_time
+                hours = round(delta.total_seconds() / 3600, 2)
+            except Exception:
+                hours = 0
+        writer.writerow([
+            r.date.isoformat(),
+            r.status,
+            r.check_in_time.isoformat() if r.check_in_time else '',
+            r.check_out_time.isoformat() if r.check_out_time else '',
+            hours,
+            'Yes' if r.is_late else 'No',
+            'Yes' if r.is_half_day else 'No',
+        ])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode('utf-8')), media_type='text/csv', headers={'Content-Disposition': f'attachment; filename="{filename}.csv"'})

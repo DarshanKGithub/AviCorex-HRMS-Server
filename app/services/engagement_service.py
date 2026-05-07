@@ -2,9 +2,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Tuple, List, Optional
 from fastapi import HTTPException, status
+from datetime import datetime, timezone
 
-from app.db.models import HelpdeskTicket, Announcement
-from app.schemas.engagement import HelpdeskTicketCreate, AnnouncementCreate
+from app.db.models import HelpdeskTicket, Announcement, GatePass
+from app.schemas.engagement import HelpdeskTicketCreate, AnnouncementCreate, GatePassCreate
 
 def create_ticket(payload: HelpdeskTicketCreate, db: Session) -> HelpdeskTicket:
     ticket = HelpdeskTicket(**payload.model_dump())
@@ -59,3 +60,43 @@ def get_announcements(
     total = query.count()
     items = query.order_by(desc(Announcement.priority), desc(Announcement.created_at)).offset((page - 1) * size).limit(size).all()
     return items, total
+
+
+def create_gatepass(payload: GatePassCreate, db: Session) -> GatePass:
+    gp = GatePass(**payload.model_dump())
+    db.add(gp)
+    db.commit()
+    db.refresh(gp)
+    return gp
+
+
+def list_gatepasses(
+    db: Session,
+    employee_id: Optional[str] = None,
+    status: Optional[str] = None,
+    page: int = 1,
+    size: int = 20,
+) -> Tuple[List[GatePass], int]:
+    query = db.query(GatePass)
+    if employee_id:
+        query = query.filter(GatePass.employee_id == employee_id)
+    if status:
+        query = query.filter(GatePass.status == status)
+
+    total = query.count()
+    items = query.order_by(desc(GatePass.created_at)).offset((page - 1) * size).limit(size).all()
+    return items, total
+
+
+def update_gatepass_status(gatepass_id: str, new_status: str, approver_id: str | None, comments: str | None, db: Session) -> GatePass:
+    gp = db.query(GatePass).filter(GatePass.id == gatepass_id).first()
+    if not gp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Gate pass request not found')
+    gp.status = new_status
+    gp.approver_id = approver_id
+    gp.admin_comments = comments
+    gp.updated_at = datetime.now(timezone.utc)
+    db.add(gp)
+    db.commit()
+    db.refresh(gp)
+    return gp

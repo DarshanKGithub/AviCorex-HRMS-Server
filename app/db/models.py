@@ -400,6 +400,23 @@ class Holiday(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+# --- Gate Pass Module ---
+class GatePass(Base):
+    __tablename__ = 'gate_passes'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(60), nullable=False)  # Personal Work, Medical, Emergency, Official Work
+    reason: Mapped[str] = mapped_column(String(1000), nullable=True)
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    expected_return_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected
+    approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    admin_comments: Mapped[str] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 # --- Phase 6 models: Payroll Management ---
 from sqlalchemy import Numeric
 
