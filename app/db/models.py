@@ -197,12 +197,6 @@ class Attendance(Base):
     is_half_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_work_from_home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
-    # Location Tracking (Geo-Fencing)
-    check_in_latitude: Mapped[float] = mapped_column(Numeric(10, 8), nullable=True)
-    check_in_longitude: Mapped[float] = mapped_column(Numeric(11, 8), nullable=True)
-    check_out_latitude: Mapped[float] = mapped_column(Numeric(10, 8), nullable=True)
-    check_out_longitude: Mapped[float] = mapped_column(Numeric(11, 8), nullable=True)
-    location_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
