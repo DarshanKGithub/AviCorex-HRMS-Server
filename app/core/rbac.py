@@ -57,6 +57,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         'view_payroll',
         'process_payroll',
         'view_audit_logs',
+        'manage_recruitment',
     },
     'Admin': {
         'view_dashboard',
@@ -78,6 +79,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         'view_audit_logs',
         'manage_roles',
         'manage_settings',
+        'manage_recruitment',
     },
     'Super Admin': {
         '*',

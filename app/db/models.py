@@ -749,3 +749,97 @@ class EmployeeGrievance(Base):
     description: Mapped[str] = mapped_column(String(2000), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='Submitted') # Submitted, Investigating, Resolved
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class EmployeeDocument(Base):
+    __tablename__ = 'employee_documents'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    document_type: Mapped[str] = mapped_column(String(100), nullable=False) # e.g., 'ID Proof', 'Offer Letter', 'Resume', 'Other'
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+# --- Phase 9 models: Recruitment and ATS ---
+
+class JobPosting(Base):
+    __tablename__ = 'job_postings'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    department_id: Mapped[str] = mapped_column(String(36), ForeignKey('departments.id'), nullable=True)
+    location: Mapped[str] = mapped_column(String(100), nullable=True)
+    employment_type: Mapped[str] = mapped_column(String(50), nullable=True) # Full-time, Part-time, Contract
+    description: Mapped[str] = mapped_column(String(4000), nullable=False)
+    requirements: Mapped[str] = mapped_column(String(4000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Open') # Open, Closed, Draft
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class Candidate(Base):
+    __tablename__ = 'candidates'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=True)
+    resume_url: Mapped[str] = mapped_column(String(1000), nullable=True)
+    parsed_skills: Mapped[str] = mapped_column(String(2000), nullable=True) # JSON array
+    source: Mapped[str] = mapped_column(String(100), nullable=True) # LinkedIn, Website, Referral
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class JobApplication(Base):
+    __tablename__ = 'job_applications'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    job_id: Mapped[str] = mapped_column(String(36), ForeignKey('job_postings.id'), nullable=False)
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey('candidates.id'), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default='Applied') # Applied, Screening, Interviewing, Offered, Hired, Rejected
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class Interview(Base):
+    __tablename__ = 'interviews'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    application_id: Mapped[str] = mapped_column(String(36), ForeignKey('job_applications.id'), nullable=False)
+    interviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    meeting_link: Mapped[str] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Scheduled') # Scheduled, Completed, Cancelled
+    feedback: Mapped[str] = mapped_column(String(2000), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=True) # 1-5
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+# --- Phase 10 models: Advanced Financials & Compensation ---
+
+class SalaryStructure(Base):
+    __tablename__ = 'salary_structures'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), unique=True, index=True)
+    base_salary: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)
+    hra: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)
+    da: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)
+    special_allowance: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.0)
+    pf_percentage: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=12.0)
+    esi_percentage: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.75)
+    tax_bracket_percentage: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class Reimbursement(Base):
+    __tablename__ = 'reimbursements'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), index=True)
+    expense_type: Mapped[str] = mapped_column(String(100), nullable=False) # Travel, Medical, Food, Office Supplies
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    receipt_url: Mapped[str] = mapped_column(String(500), nullable=True)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending') # Pending, Approved, Rejected, Paid
+    applied_on: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class EmployeeLoan(Base):
+    __tablename__ = 'employee_loans'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), index=True)
+    loan_type: Mapped[str] = mapped_column(String(50), nullable=False) # Personal, Advance Salary
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    interest_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.0)
+    emi_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    remaining_balance: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Active') # Active, Closed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

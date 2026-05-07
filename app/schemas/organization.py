@@ -18,3 +18,11 @@ class DesignationCreate(BaseModel):
 class DesignationPublic(BaseModel):
     id: str
     name: str
+
+class OrgNode(BaseModel):
+    id: str
+    full_name: str
+    designation: str | None = None
+    department: str | None = None
+    manager_id: str | None = None
+    children: list['OrgNode'] = []

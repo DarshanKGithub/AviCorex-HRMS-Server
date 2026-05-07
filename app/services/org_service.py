@@ -35,3 +35,32 @@ def create_designation(payload: DesignationCreate, db: Session) -> Designation:
     db.commit()
     db.refresh(des)
     return des
+
+
+def get_org_hierarchy(db: Session) -> List[dict]:
+    from app.db.models import Employee
+    employees = db.query(Employee, Department, Designation)\
+        .outerjoin(Department, Employee.department_id == Department.id)\
+        .outerjoin(Designation, Employee.designation_id == Designation.id)\
+        .filter(Employee.is_active == True).all()
+
+    nodes = {}
+    for emp, dept, desig in employees:
+        nodes[emp.id] = {
+            "id": emp.id,
+            "full_name": emp.full_name,
+            "designation": desig.name if desig else None,
+            "department": dept.name if dept else None,
+            "manager_id": emp.manager_id,
+            "children": []
+        }
+
+    hierarchy = []
+    for emp_id, node in nodes.items():
+        mgr_id = node['manager_id']
+        if mgr_id and mgr_id in nodes:
+            nodes[mgr_id]['children'].append(node)
+        else:
+            hierarchy.append(node)
+            
+    return hierarchy

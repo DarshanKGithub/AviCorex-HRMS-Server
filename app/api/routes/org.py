@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.rbac import require_permissions
+from app.core.rbac import require_permissions, get_current_user
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.organization import DepartmentCreate, DepartmentPublic, DesignationCreate, DesignationPublic
-from app.services.org_service import list_departments, create_department, list_designations, create_designation
+from app.schemas.organization import DepartmentCreate, DepartmentPublic, DesignationCreate, DesignationPublic, OrgNode
+from app.services.org_service import list_departments, create_department, list_designations, create_designation, get_org_hierarchy
 
 router = APIRouter()
 
@@ -38,3 +38,11 @@ def create_des(
 ) -> DesignationPublic:
     d = create_designation(payload=payload, db=db)
     return DesignationPublic(id=d.id, name=d.name)
+
+
+@router.get('/hierarchy', response_model=list[OrgNode])
+def get_hierarchy(
+    _user: User = Depends(get_current_user), # Just basic auth for now
+    db: Session = Depends(get_db),
+):
+    return get_org_hierarchy(db)

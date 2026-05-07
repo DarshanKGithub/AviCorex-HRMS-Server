@@ -39,9 +39,16 @@ from app.api.routes.admin import router as admin_router
 from app.api.routes.advanced_attendance import router as adv_attendance_router
 from app.api.routes.engagement import router as engagement_router
 
+from app.api.routes.recruitment import router as recruitment_router
+from app.api.routes.documents import router as documents_router
+from app.api.routes.financials import router as financials_router
+
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
 app.include_router(adv_attendance_router, prefix='/advanced-attendance', tags=['advanced_attendance'])
 app.include_router(engagement_router, prefix='/engagement', tags=['engagement'])
+app.include_router(recruitment_router, prefix='/recruitment', tags=['recruitment'])
+app.include_router(documents_router, prefix='/documents', tags=['documents'])
+app.include_router(financials_router, prefix='/financials', tags=['financials'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
