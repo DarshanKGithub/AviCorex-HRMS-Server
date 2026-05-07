@@ -563,7 +563,7 @@ class Timesheet(Base):
     __tablename__ = 'timesheets'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
+    date: Mapped["date"] = mapped_column(Date, nullable=False)
     project_id: Mapped[str] = mapped_column(String(36), nullable=True)
     task_description: Mapped[str] = mapped_column(String(1000), nullable=False)
     hours_worked: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
@@ -578,7 +578,7 @@ class OvertimeRequest(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
     attendance_id: Mapped[str] = mapped_column(String(36), ForeignKey('attendance.id'), nullable=True)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
+    date: Mapped["date"] = mapped_column(Date, nullable=False)
     hours: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
     reason: Mapped[str] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending') # Pending, Approved, Rejected
@@ -592,7 +592,7 @@ class AttendanceRegularization(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
     attendance_id: Mapped[str] = mapped_column(String(36), ForeignKey('attendance.id'), nullable=True)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
+    date: Mapped["date"] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(String(1000), nullable=False)
     requested_check_in: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     requested_check_out: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -653,7 +653,7 @@ class RosterEntry(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     roster_id: Mapped[str] = mapped_column(String(36), ForeignKey('rosters.id'), nullable=False, index=True)
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
+    date: Mapped["date"] = mapped_column(Date, nullable=False)
     shift_id: Mapped[str] = mapped_column(String(36), ForeignKey('shifts.id'), nullable=True)
     is_off_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -843,3 +843,7 @@ class EmployeeLoan(Base):
     remaining_balance: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='Active') # Active, Closed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+
+

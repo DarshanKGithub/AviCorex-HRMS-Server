@@ -283,3 +283,87 @@ def reject_regularization_endpoint(
     """Reject a regularization request."""
     reg = reject_regularization(reg_id, user.id, db)
     return AttendanceRegularizationPublic.model_validate(reg)
+
+# --- Biometric & Geo-fencing Routes ---
+
+from app.schemas.advanced_attendance import BiometricLogPublic, BiometricLogCreate
+from app.db.models import BiometricLog, Attendance
+from datetime import datetime, timezone
+
+@router.post('/biometrics/sync', response_model=BiometricLogPublic)
+def sync_biometric_log(
+    payload: BiometricLogCreate,
+    user: User = Depends(require_permissions('manage_attendance')),
+    db: Session = Depends(get_db)
+):
+    """Sync log from a biometric device."""
+    log = BiometricLog(**payload.model_dump())
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return BiometricLogPublic.model_validate(log)
+
+@router.post('/geo-attendance/check-in')
+def geo_check_in(
+    latitude: float,
+    longitude: float,
+    image_url: Optional[str] = None, # For face recognition
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Check-in using GPS location and optional Face ID."""
+    today = datetime.now(timezone.utc).date()
+    attendance = db.query(Attendance).filter(Attendance.employee_id == user.id, Attendance.attendance_date == today).first()
+    
+    if attendance and attendance.check_in_time:
+        raise HTTPException(status_code=400, detail="Already checked in today")
+        
+    if not attendance:
+        attendance = Attendance(employee_id=user.id, attendance_date=today, status='present')
+        db.add(attendance)
+        
+    attendance.check_in_time = datetime.now(timezone.utc)
+    # Storing geo-data directly in the BiometricLog for tracking
+    geo_log = BiometricLog(
+        device_id="mobile-gps",
+        employee_id=user.id,
+        timestamp=datetime.now(timezone.utc),
+        log_type='IN',
+        latitude=latitude,
+        longitude=longitude,
+        image_url=image_url
+    )
+    db.add(geo_log)
+    db.commit()
+    db.refresh(attendance)
+    return {"status": "success", "check_in_time": attendance.check_in_time}
+
+# --- Roster Management ---
+
+from app.schemas.advanced_attendance import RosterCreate, RosterPublic, RosterEntryCreate, RosterEntryPublic
+from app.db.models import Roster, RosterEntry
+
+@router.post('/rosters', response_model=RosterPublic)
+def create_roster(
+    payload: RosterCreate,
+    user: User = Depends(require_permissions('manage_attendance')),
+    db: Session = Depends(get_db)
+):
+    roster = Roster(**payload.model_dump())
+    db.add(roster)
+    db.commit()
+    db.refresh(roster)
+    return RosterPublic.model_validate(roster)
+
+@router.post('/roster-entries', response_model=RosterEntryPublic)
+def add_roster_entry(
+    payload: RosterEntryCreate,
+    user: User = Depends(require_permissions('manage_attendance')),
+    db: Session = Depends(get_db)
+):
+    entry = RosterEntry(**payload.model_dump())
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return RosterEntryPublic.model_validate(entry)
+
