@@ -11,10 +11,10 @@ class Base(DeclarativeBase):
 
 
 engine_kwargs = {}
-if settings.database_url.startswith('sqlite'):
+if settings.sqlalchemy_database_url.startswith('sqlite'):
     engine_kwargs['connect_args'] = {'check_same_thread': False}
 
-engine = create_engine(settings.database_url, future=True, **engine_kwargs)
+engine = create_engine(settings.sqlalchemy_database_url, future=True, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 

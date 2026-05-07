@@ -14,6 +14,18 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
     @property
+    def sqlalchemy_database_url(self) -> str:
+        """Return a SQLAlchemy URL compatible with installed Postgres driver."""
+        raw = self.database_url.strip()
+        if raw.startswith('postgresql+'):  # driver already specified
+            return raw
+        if raw.startswith('postgres://'):
+            return raw.replace('postgres://', 'postgresql+psycopg://', 1)
+        if raw.startswith('postgresql://'):
+            return raw.replace('postgresql://', 'postgresql+psycopg://', 1)
+        return raw
+
+    @property
     def cors_origins(self) -> list[str]:
         return [origin.rstrip('/').strip() for origin in self.frontend_origins.split(',') if origin.strip()]
 
