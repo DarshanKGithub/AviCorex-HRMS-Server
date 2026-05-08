@@ -398,6 +398,20 @@ class LeaveRequest(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected, cancelled
     approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# --- Simple To Do model for user tasks / personal checklist
+class TodoItem(Base):
+    __tablename__ = 'todo_items'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='open')  # open, in_progress, done
+    due_date: Mapped[date] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -793,6 +807,67 @@ class JobApplication(Base):
     candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey('candidates.id'), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default='Applied') # Applied, Screening, Interviewing, Offered, Hired, Rejected
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# --- Phase 10.5 models: Offers, Onboarding, Exits, Assets ---
+
+class OfferLetter(Base):
+    __tablename__ = 'offer_letters'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey('candidates.id'), nullable=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    salary_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    joining_date: Mapped[date] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Draft')
+    notes: Mapped[str] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class OnboardingPlan(Base):
+    __tablename__ = 'onboarding_plans'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    probation_end_date: Mapped[date] = mapped_column(Date, nullable=True)
+    checklist: Mapped[str] = mapped_column(String(2000), nullable=False, default='[]')
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Initiated')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ExitCase(Base):
+    __tablename__ = 'exit_cases'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    exit_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=True)
+    notice_period_end: Mapped[date] = mapped_column(Date, nullable=True)
+    last_working_day: Mapped[date] = mapped_column(Date, nullable=True)
+    settlement_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Requested')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class AssetInventory(Base):
+    __tablename__ = 'asset_inventory'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    asset_tag: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    serial_number: Mapped[str] = mapped_column(String(120), nullable=True)
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Available')
+    assigned_on: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 class Interview(Base):
     __tablename__ = 'interviews'

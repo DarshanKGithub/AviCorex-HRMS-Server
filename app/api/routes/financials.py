@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post('/salary-structures', response_model=SalaryStructurePublic)
 def create_salary_structure(
     payload: SalaryStructureCreate,
-    user: User = Depends(require_permissions('manage_payroll')),
+    user: User = Depends(require_permissions('process_payroll')),
     db: Session = Depends(get_db)
 ):
     existing = db.query(SalaryStructure).filter(SalaryStructure.employee_id == payload.employee_id).first()
@@ -39,11 +39,9 @@ def get_salary_structure(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if employee_id != user.id and not require_permissions('view_payroll'):
-        # For simplicity, assuming validation handles it. Actually, require_permissions is a dependency, so we'll just check role directly
-        if user.role not in ['HR', 'Admin', 'Manager', 'CEO']:
-            raise HTTPException(status_code=403, detail="Not authorized")
-            
+    if employee_id != user.id and user.role not in ['HR', 'Admin', 'Manager', 'CEO']:
+        raise HTTPException(status_code=403, detail='Not authorized')
+
     struct = db.query(SalaryStructure).filter(SalaryStructure.employee_id == employee_id).first()
     if not struct:
         raise HTTPException(status_code=404, detail="Salary structure not found")

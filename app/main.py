@@ -38,6 +38,8 @@ app.include_router(payroll_router, prefix='/payroll', tags=['payroll'])
 from app.api.routes.admin import router as admin_router
 from app.api.routes.advanced_attendance import router as adv_attendance_router
 from app.api.routes.engagement import router as engagement_router
+from app.api.routes.todo import router as todo_router
+from app.api.routes.lifecycle import router as lifecycle_router
 
 from app.api.routes.recruitment import router as recruitment_router
 from app.api.routes.documents import router as documents_router
@@ -49,6 +51,8 @@ app.include_router(engagement_router, prefix='/engagement', tags=['engagement'])
 app.include_router(recruitment_router, prefix='/recruitment', tags=['recruitment'])
 app.include_router(documents_router, prefix='/documents', tags=['documents'])
 app.include_router(financials_router, prefix='/financials', tags=['financials'])
+app.include_router(todo_router, prefix='/todo', tags=['todo'])
+app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
