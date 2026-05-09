@@ -682,20 +682,48 @@ class PerformanceAppraisal(Base):
     reviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=True)
     review_period: Mapped[str] = mapped_column(String(100), nullable=False) # e.g. "Q1 2026"
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='Draft') # Draft, Submitted, Completed
+    review_date: Mapped[date] = mapped_column(Date, nullable=True)
     rating: Mapped[float] = mapped_column(Numeric(3, 1), nullable=True)
+    goals_achieved: Mapped[str] = mapped_column(String(2000), nullable=True)
+    areas_for_improvement: Mapped[str] = mapped_column(String(2000), nullable=True)
     comments: Mapped[str] = mapped_column(String(2000), nullable=True)
+    next_review_date: Mapped[date] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class Goal(Base):
+    __tablename__ = 'goals'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    appraisal_id: Mapped[str] = mapped_column(String(36), ForeignKey('performance_appraisals.id'), nullable=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Active') # Active, Paused, Completed, Cancelled
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    target_value: Mapped[float] = mapped_column(Numeric(10, 2), nullable=True)
+    achieved_value: Mapped[float] = mapped_column(Numeric(10, 2), nullable=True)
+    achievement_percentage: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class KPI(Base):
     __tablename__ = 'kpis'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    goal_id: Mapped[str] = mapped_column(String(36), ForeignKey('goals.id'), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    target: Mapped[str] = mapped_column(String(500), nullable=False)
-    achieved: Mapped[str] = mapped_column(String(500), nullable=True)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Active') # Active, Paused, Completed
+    target_value: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    achieved_value: Mapped[float] = mapped_column(Numeric(10, 2), nullable=True, default=0.0)
     weightage: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.0)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class TrainingCourse(Base):
