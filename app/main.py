@@ -64,6 +64,7 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_attendance_columns()
+    _ensure_leave_balance_columns()
     # Run each seeder in its own session. If one seeder fails, rollback and continue
     seeders = [
         seed_demo_users,
@@ -112,6 +113,34 @@ def _ensure_attendance_columns() -> None:
             if column_name in existing:
                 continue
             conn.execute(text(f"ALTER TABLE attendance ADD COLUMN {column_name} {sql_type}"))
+
+
+def _ensure_leave_balance_columns() -> None:
+    """Backfill older databases that were created before granted_days existed."""
+    required_columns = {
+        'granted_days': 'INTEGER NOT NULL DEFAULT 0',
+    }
+
+    with engine.begin() as conn:
+        existing = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'leave_balances'
+                    """
+                )
+            )
+        }
+
+        for column_name, sql_type in required_columns.items():
+            if column_name in existing:
+                continue
+            conn.execute(text(f"ALTER TABLE leave_balances ADD COLUMN {column_name} {sql_type}"))
+            if column_name == 'granted_days':
+                conn.execute(text("UPDATE leave_balances SET granted_days = balance_days"))
 
 
 @app.get('/')
