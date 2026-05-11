@@ -18,8 +18,7 @@ from app.schemas.notifications import (
     NotificationPreferenceUpdate, NotificationPreferencePublic,
     BulkNotificationCreate, NotificationStats, NotificationFilter
 )
-
-router = APIRouter(prefix='/notifications', tags=['Notifications'])
+router = APIRouter(tags=['Notifications'])
 
 
 # --- Template Management ---
