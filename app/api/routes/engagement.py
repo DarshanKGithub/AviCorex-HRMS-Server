@@ -18,7 +18,8 @@ from app.schemas.grievance import (
     EmployeeGrievanceCreate,
     EmployeeGrievancePublic,
     PaginatedEmployeeGrievances,
-    EmployeeGrievanceStatusUpdate
+    EmployeeGrievanceStatusUpdate,
+    GrievanceInvestigationUpdate
 )
 from app.services.engagement_service import (
     create_ticket,
@@ -32,7 +33,8 @@ from app.services.grievance_service import (
     get_grievances,
     get_all_grievances,
     get_grievance,
-    update_grievance_status
+    update_grievance_status,
+    investigate_grievance
 )
 
 router = APIRouter()
@@ -242,6 +244,21 @@ def update_grievance_status_endpoint(
 ):
     """Update grievance status (admin only)"""
     grievance = update_grievance_status(grievance_id, payload, db)
+    if not grievance:
+        raise HTTPException(status_code=404, detail='Grievance not found')
+    
+    return EmployeeGrievancePublic.model_validate(grievance)
+
+
+@router.put('/grievances/{grievance_id}/investigate', response_model=EmployeeGrievancePublic)
+def investigate_grievance_endpoint(
+    grievance_id: str,
+    payload: GrievanceInvestigationUpdate,
+    user: User = Depends(require_permissions('manage_grievances')),
+    db: Session = Depends(get_db)
+):
+    """Update grievance investigation (admin only)"""
+    grievance = investigate_grievance(grievance_id, payload, db)
     if not grievance:
         raise HTTPException(status_code=404, detail='Grievance not found')
     

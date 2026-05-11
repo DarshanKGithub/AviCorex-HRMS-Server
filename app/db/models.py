@@ -790,6 +790,10 @@ class EmployeeGrievance(Base):
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(String(2000), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='Submitted') # Submitted, Investigating, Resolved
+    investigator_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=True)
+    investigation_notes: Mapped[str] = mapped_column(String(2000), nullable=True)
+    meeting_scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 class EmployeeDocument(Base):
@@ -1049,4 +1053,34 @@ class Feedback(Base):
     feedback_type: Mapped[str] = mapped_column(String(50), nullable=False) # Peer, Manager, Anonymous
     content: Mapped[str] = mapped_column(String(2000), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+# --- Phase 9 models: Dynamic Workflow Engine & Form Builder ---
+
+class FormTemplate(Base):
+    __tablename__ = 'form_templates'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    schema_json: Mapped[str] = mapped_column(String(5000), nullable=False) # JSON definition of form fields
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class WorkflowTemplate(Base):
+    __tablename__ = 'workflow_templates'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    trigger_event: Mapped[str] = mapped_column(String(120), nullable=False) # e.g. "ON_EMPLOYEE_JOIN"
+    steps_json: Mapped[str] = mapped_column(String(5000), nullable=False) # JSON array defining sequence of steps
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class WorkflowInstance(Base):
+    __tablename__ = 'workflow_instances'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    template_id: Mapped[str] = mapped_column(String(36), ForeignKey('workflow_templates.id'), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False) # e.g. employee_id or document_id
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='In Progress') # In Progress, Completed, Failed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

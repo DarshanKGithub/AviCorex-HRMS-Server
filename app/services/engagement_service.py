@@ -4,8 +4,9 @@ from typing import Tuple, List, Optional
 from fastapi import HTTPException, status
 from datetime import datetime, timezone
 
-from app.db.models import HelpdeskTicket, Announcement, GatePass
+from app.db.models import HelpdeskTicket, Announcement, GatePass, Employee
 from app.schemas.engagement import HelpdeskTicketCreate, AnnouncementCreate, GatePassCreate
+from app.services.notification_service import NotificationService
 
 def create_ticket(payload: HelpdeskTicketCreate, db: Session) -> HelpdeskTicket:
     ticket = HelpdeskTicket(**payload.model_dump())
@@ -49,6 +50,20 @@ def create_announcement(payload: AnnouncementCreate, db: Session) -> Announcemen
     db.add(ann)
     db.commit()
     db.refresh(ann)
+    
+    # Broadcast announcement
+    employees = db.query(Employee).filter(Employee.is_active == True).all()
+    emp_ids = [e.id for e in employees]
+    if emp_ids:
+        NotificationService.send_bulk_notifications(
+            db=db,
+            recipient_ids=emp_ids,
+            event_type="announcement",
+            channel="in_app",
+            subject=f"New Announcement: {ann.title}",
+            message=ann.content
+        )
+    
     return ann
 
 def get_announcements(

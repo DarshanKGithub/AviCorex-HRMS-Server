@@ -16,11 +16,20 @@ class EmployeeGrievanceCreate(EmployeeGrievanceBase):
 class EmployeeGrievanceStatusUpdate(BaseModel):
     status: str = Field(..., description="New status: Submitted, Investigating, Resolved")
 
+class GrievanceInvestigationUpdate(BaseModel):
+    investigator_id: Optional[str] = None
+    investigation_notes: Optional[str] = None
+    meeting_scheduled_at: Optional[datetime] = None
+    status: Optional[str] = None
+
 
 class EmployeeGrievancePublic(EmployeeGrievanceBase):
     id: str
     employee_id: str
     status: str
+    investigator_id: Optional[str] = None
+    investigation_notes: Optional[str] = None
+    meeting_scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

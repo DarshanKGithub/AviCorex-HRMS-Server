@@ -4,6 +4,7 @@ from app.db.models import EmployeeGrievance
 from app.schemas.grievance import (
     EmployeeGrievanceCreate,
     EmployeeGrievanceStatusUpdate,
+    GrievanceInvestigationUpdate,
 )
 from typing import List, Tuple
 from datetime import datetime
@@ -104,3 +105,28 @@ def update_grievance_status(
     db.commit()
     db.refresh(grievance)
     return grievance
+
+def investigate_grievance(
+    grievance_id: str,
+    investigation_update: GrievanceInvestigationUpdate,
+    db: Session,
+) -> EmployeeGrievance:
+    """Update grievance investigation details"""
+    grievance = get_grievance(db, grievance_id)
+    if not grievance:
+        return None
+    
+    if investigation_update.investigator_id is not None:
+        grievance.investigator_id = investigation_update.investigator_id
+    if investigation_update.investigation_notes is not None:
+        grievance.investigation_notes = investigation_update.investigation_notes
+    if investigation_update.meeting_scheduled_at is not None:
+        grievance.meeting_scheduled_at = investigation_update.meeting_scheduled_at
+    if investigation_update.status is not None:
+        grievance.status = investigation_update.status
+
+    grievance.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(grievance)
+    return grievance
+
