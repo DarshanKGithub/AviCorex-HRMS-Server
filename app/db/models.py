@@ -1000,3 +1000,53 @@ class NotificationPreference(Base):
 
 
 
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, Numeric
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime, timezone
+from uuid import uuid4
+from app.db.database import Base
+
+class Survey(Base):
+    __tablename__ = 'surveys'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Draft') # Draft, Active, Closed
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class SurveyQuestion(Base):
+    __tablename__ = 'survey_questions'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    survey_id: Mapped[str] = mapped_column(String(36), ForeignKey('surveys.id'), nullable=False, index=True)
+    question_text: Mapped[str] = mapped_column(String(500), nullable=False)
+    question_type: Mapped[str] = mapped_column(String(30), nullable=False) # Rating, Text, MultipleChoice
+    options: Mapped[str] = mapped_column(String(1000), nullable=True) # JSON string of options
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+class SurveyResponse(Base):
+    __tablename__ = 'survey_responses'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    survey_id: Mapped[str] = mapped_column(String(36), ForeignKey('surveys.id'), nullable=False, index=True)
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class SurveyAnswer(Base):
+    __tablename__ = 'survey_answers'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    response_id: Mapped[str] = mapped_column(String(36), ForeignKey('survey_responses.id'), nullable=False, index=True)
+    question_id: Mapped[str] = mapped_column(String(36), ForeignKey('survey_questions.id'), nullable=False)
+    answer_text: Mapped[str] = mapped_column(String(2000), nullable=True)
+    rating_value: Mapped[int] = mapped_column(Integer, nullable=True)
+
+class Feedback(Base):
+    __tablename__ = 'feedback'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
+    reviewer_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=True)
+    feedback_type: Mapped[str] = mapped_column(String(50), nullable=False) # Peer, Manager, Anonymous
+    content: Mapped[str] = mapped_column(String(2000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
