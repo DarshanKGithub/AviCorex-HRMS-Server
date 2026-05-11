@@ -14,6 +14,10 @@ from app.schemas.leave import (
     PaginatedLeaveRequests,
     ApprovePayload,
     LeaveBalancePublic,
+    BulkApprovePayload,
+    BulkApproveResult,
+    HolidayCreate,
+    HolidayPublic,
 )
 from app.services.leave_service import (
     create_leave_request,
@@ -22,6 +26,10 @@ from app.services.leave_service import (
     approve_leave,
     get_leave_balances,
     save_leave_attachment,
+    bulk_approve_leave,
+    list_holidays,
+    create_holiday,
+    delete_holiday,
 )
 router = APIRouter()
 
@@ -192,6 +200,22 @@ def approve_request_endpoint(
     })
 
 
+@router.post('/requests/bulk-approve', response_model=BulkApproveResult)
+def bulk_approve_requests_endpoint(
+    payload: BulkApprovePayload,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not has_permission(user.role, 'approve_leave'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+
+    if not payload.request_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='request_ids cannot be empty')
+
+    result = bulk_approve_leave(payload.request_ids, user.id, payload.approve, db)
+    return BulkApproveResult.model_validate(result)
+
+
 @router.get('/balances', response_model=list[LeaveBalancePublic])
 def balances_endpoint(
     employee_id: str | None = Query(None),
@@ -250,6 +274,61 @@ def balances_with_details_endpoint(
             'updated_at': b.updated_at.isoformat(),
         })
     return out
+
+
+@router.get('/holidays', response_model=list[HolidayPublic])
+def list_holidays_endpoint(
+    year: int | None = Query(None),
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    holidays = list_holidays(db, year=year)
+    return [
+        HolidayPublic.model_validate(
+            {
+                'id': holiday.id,
+                'name': holiday.name,
+                'holiday_date': holiday.holiday_date,
+                'is_public': holiday.is_public,
+                'created_at': holiday.created_at,
+            }
+        )
+        for holiday in holidays
+    ]
+
+
+@router.post('/holidays', response_model=HolidayPublic)
+def create_holiday_endpoint(
+    payload: HolidayCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not has_permission(user.role, 'approve_leave'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+
+    holiday = create_holiday(payload.name, payload.holiday_date, payload.is_public, db)
+    return HolidayPublic.model_validate(
+        {
+            'id': holiday.id,
+            'name': holiday.name,
+            'holiday_date': holiday.holiday_date,
+            'is_public': holiday.is_public,
+            'created_at': holiday.created_at,
+        }
+    )
+
+
+@router.delete('/holidays/{holiday_id}')
+def delete_holiday_endpoint(
+    holiday_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not has_permission(user.role, 'approve_leave'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+
+    delete_holiday(holiday_id, db)
+    return {'ok': True}
 
 
 @router.post('/requests/{request_id}/upload')

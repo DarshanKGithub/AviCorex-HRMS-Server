@@ -1,8 +1,12 @@
 import pytest
 from sqlalchemy.orm import Session
 from datetime import date
-from app.db.database import SessionLocal
-from app.db.models import Base, engine, User, Employee, PerformanceAppraisal, Goal, KPI
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.database import Base
+from app.db.models import User, Employee, PerformanceAppraisal, Goal, KPI
 from app.services.performance_service import PerformanceService, GoalService, KPIService
 from app.schemas.performance import (
     PerformanceAppraisalCreate, GoalCreate, KPICreate
@@ -11,8 +15,15 @@ from app.schemas.performance import (
 
 @pytest.fixture
 def db():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+    engine = create_engine(
+        'sqlite://',
+        future=True,
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    db = Session()
     yield db
     db.close()
     Base.metadata.drop_all(bind=engine)
@@ -22,9 +33,10 @@ def db():
 def test_user(db: Session):
     user = User(
         id='user1',
-        username='testuser',
+        full_name='Test User',
         email='test@example.com',
-        hashed_password='hashed',
+        role='Employee',
+        password_hash='hashed',
         is_active=True
     )
     db.add(user)
@@ -36,7 +48,6 @@ def test_user(db: Session):
 def test_employee(db: Session, test_user: User):
     employee = Employee(
         id='emp1',
-        user_id='user1',
         full_name='Test Employee',
         email='emp@example.com',
         phone='1234567890',

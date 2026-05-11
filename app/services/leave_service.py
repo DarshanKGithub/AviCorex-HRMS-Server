@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 import json
 
-from app.db.models import LeaveRequest, LeaveType, LeaveBalance, Employee, AuditLog
+from app.db.models import LeaveRequest, LeaveType, LeaveBalance, Employee, AuditLog, Holiday
 
 # File upload configuration
 LEAVE_UPLOADS_DIR = Path(__file__).resolve().parents[2] / 'uploads' / 'leave_attachments'
@@ -172,3 +172,60 @@ def approve_leave(leave_id: str, approver_id: str, approve: bool, db: Session) -
 
 def get_leave_balances(employee_id: str, db: Session) -> list[LeaveBalance]:
     return db.query(LeaveBalance).filter(LeaveBalance.employee_id == employee_id).all()
+
+
+def bulk_approve_leave(request_ids: list[str], approver_id: str, approve: bool, db: Session) -> dict:
+    processed = 0
+    approved = 0
+    rejected = 0
+    failed = 0
+    failed_ids: list[str] = []
+
+    for request_id in request_ids:
+        try:
+            approve_leave(request_id, approver_id, approve, db)
+            processed += 1
+            if approve:
+                approved += 1
+            else:
+                rejected += 1
+        except Exception:
+            failed += 1
+            failed_ids.append(request_id)
+
+    return {
+        'processed': processed,
+        'approved': approved,
+        'rejected': rejected,
+        'failed': failed,
+        'failed_ids': failed_ids,
+    }
+
+
+def list_holidays(db: Session, year: int | None = None) -> list[Holiday]:
+    query = db.query(Holiday)
+    if year is not None:
+        start = datetime(year, 1, 1).date()
+        end = datetime(year, 12, 31).date()
+        query = query.filter(Holiday.holiday_date >= start, Holiday.holiday_date <= end)
+    return query.order_by(Holiday.holiday_date.asc()).all()
+
+
+def create_holiday(name: str, holiday_date, is_public: bool, db: Session) -> Holiday:
+    existing = db.query(Holiday).filter(Holiday.holiday_date == holiday_date, Holiday.name == name).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Holiday already exists')
+
+    holiday = Holiday(name=name, holiday_date=holiday_date, is_public=is_public)
+    db.add(holiday)
+    db.commit()
+    db.refresh(holiday)
+    return holiday
+
+
+def delete_holiday(holiday_id: str, db: Session) -> None:
+    holiday = db.query(Holiday).filter(Holiday.id == holiday_id).first()
+    if not holiday:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Holiday not found')
+    db.delete(holiday)
+    db.commit()

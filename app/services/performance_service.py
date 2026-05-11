@@ -87,7 +87,7 @@ class GoalService:
     def create_goal(db: Session, payload: GoalCreate) -> Goal:
         achievement_percentage = 0.0
         if payload.target_value and payload.target_value > 0 and payload.achieved_value:
-            achievement_percentage = min((payload.achieved_value / payload.target_value) * 100, 100.0)
+            achievement_percentage = min((float(payload.achieved_value) / float(payload.target_value)) * 100, 100.0)
         
         goal = Goal(
             id=str(uuid4()),
@@ -135,7 +135,7 @@ class GoalService:
             target = update_data.get('target_value', goal.target_value)
             achieved = update_data.get('achieved_value', goal.achieved_value)
             if target and target > 0 and achieved:
-                goal.achievement_percentage = min((achieved / target) * 100, 100.0)
+                goal.achievement_percentage = min((float(achieved) / float(target)) * 100, 100.0)
         
         for field, value in update_data.items():
             if field != 'achievement_percentage':
@@ -163,7 +163,7 @@ class KPIService:
     def create_kpi(db: Session, payload: KPICreate) -> KPI:
         achievement_percentage = 0.0
         if payload.target_value and payload.target_value > 0 and payload.achieved_value:
-            achievement_percentage = min((payload.achieved_value / payload.target_value) * 100, 100.0)
+            achievement_percentage = min((float(payload.achieved_value) / float(payload.target_value)) * 100, 100.0)
         
         kpi = KPI(
             id=str(uuid4()),
@@ -236,12 +236,15 @@ class KPIService:
         
         weighted_score = 0.0
         for kpi in kpis:
-            achievement = min((kpi.achieved_value or 0) / kpi.target_value * 100, 100) if kpi.target_value > 0 else 0
-            weighted_score += (achievement * kpi.weightage) / 100
+            target_value = float(kpi.target_value or 0)
+            achieved_value = float(kpi.achieved_value or 0)
+            weightage = float(kpi.weightage or 0)
+            achievement = min((achieved_value / target_value) * 100, 100) if target_value > 0 else 0
+            weighted_score += (achievement * weightage) / 100
         
         return {
-            'score': round(weighted_score / total_weight * 100, 2),
-            'total_weight': total_weight,
+            'score': round(weighted_score / float(total_weight) * 100, 2),
+            'total_weight': float(total_weight),
             'kpi_count': len(kpis)
         }
 

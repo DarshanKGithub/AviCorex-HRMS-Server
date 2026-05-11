@@ -76,3 +76,30 @@ class FileUploadResponse(BaseModel):
     file_path: str
     filename: str
     size: int
+
+
+class BulkApprovePayload(BaseModel):
+    request_ids: list[str] = Field(default_factory=list)
+    approve: bool = True
+
+
+class BulkApproveResult(BaseModel):
+    processed: int
+    approved: int
+    rejected: int
+    failed: int
+    failed_ids: list[str] = Field(default_factory=list)
+
+
+class HolidayCreate(BaseModel):
+    name: str
+    holiday_date: date
+    is_public: bool = True
+
+
+class HolidayPublic(BaseModel):
+    id: str
+    name: str
+    holiday_date: date
+    is_public: bool
+    created_at: datetime

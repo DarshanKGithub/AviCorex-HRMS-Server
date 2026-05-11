@@ -948,5 +948,55 @@ class EmployeeLoan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+# --- Phase 13: Notification Automation ---
+
+class NotificationTemplate(Base):
+    __tablename__ = 'notification_templates'
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)  # leave_approved, payslip_generated, etc.
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)  # email, sms, in_app, push
+    subject: Mapped[str] = mapped_column(String(200), nullable=True)  # For email
+    body: Mapped[str] = mapped_column(String(2000), nullable=False)  # Template with {variable} placeholders
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Notification(Base):
+    __tablename__ = 'notifications'
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    recipient_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False, index=True)
+    template_id: Mapped[str] = mapped_column(String(36), ForeignKey('notification_templates.id'), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)  # email, sms, in_app, push
+    subject: Mapped[str] = mapped_column(String(200), nullable=True)
+    message: Mapped[str] = mapped_column(String(2000), nullable=False)
+    data: Mapped[str] = mapped_column(String(2000), nullable=True)  # JSON metadata
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='Pending')  # Pending, Sent, Failed, Read
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class NotificationPreference(Base):
+    __tablename__ = 'notification_preferences'
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=False, index=True, unique=True)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    in_app_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    push_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    quiet_hours_start: Mapped[str] = mapped_column(String(5), nullable=True)  # HH:MM format
+    quiet_hours_end: Mapped[str] = mapped_column(String(5), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
 
 
