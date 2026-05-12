@@ -298,8 +298,12 @@ def seed_demo_leave_data(db: Session) -> None:
         if name in existing_types:
             continue
         try:
-            db.add(LeaveType(name=name, description=desc, default_days_per_year=days))
+            # Use a SAVEPOINT per row so one bad insert doesn't poison startup seeding.
+            with db.begin_nested():
+                db.add(LeaveType(name=name, description=desc, default_days_per_year=days))
+                db.flush()
             created = True
+            existing_types.add(name)
         except Exception:
             continue
 
@@ -316,8 +320,11 @@ def seed_demo_leave_data(db: Session) -> None:
         if hd in existing_holidays:
             continue
         try:
-            db.add(Holiday(name=name, holiday_date=hd, is_public=True))
+            with db.begin_nested():
+                db.add(Holiday(name=name, holiday_date=hd, is_public=True))
+                db.flush()
             created = True
+            existing_holidays.add(hd)
         except Exception:
             continue
 
@@ -343,13 +350,21 @@ def seed_demo_leave_data(db: Session) -> None:
                         granted_days=lt.default_days_per_year,
                         balance_days=lt.default_days_per_year
                     )
-                    db.add(balance)
-                    created = True
+                    try:
+                        with db.begin_nested():
+                            db.add(balance)
+                            db.flush()
+                        created = True
+                    except Exception:
+                        continue
     except Exception as e:
         pass
 
     if created:
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 # --- Phase 5 models: Leave Management ---

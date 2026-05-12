@@ -13,6 +13,10 @@ from app.api.routes.payroll import router as payroll_router
 from app.core.config import settings
 from app.db.database import engine, SessionLocal
 from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
 
@@ -42,16 +46,27 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+
+    def run_seed_step(session, step_name: str, step_fn) -> None:
+        try:
+            step_fn(session)
+        except Exception as exc:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            logger.exception('Seed step failed: %s (%s)', step_name, exc)
+
     with SessionLocal() as session:
-        seed_demo_users(session)
+        run_seed_step(session, 'seed_demo_users', seed_demo_users)
         # seed Phase 2 default org data
-        seed_demo_org(session)
+        run_seed_step(session, 'seed_demo_org', seed_demo_org)
         # seed Phase 4 default shift and rule data
-        seed_demo_shifts(session)
+        run_seed_step(session, 'seed_demo_shifts', seed_demo_shifts)
         # seed Phase 5 leave types and holidays
-        seed_demo_leave_data(session)
+        run_seed_step(session, 'seed_demo_leave_data', seed_demo_leave_data)
         # seed Phase 6 salary components
-        seed_demo_salary_data(session)
+        run_seed_step(session, 'seed_demo_salary_data', seed_demo_salary_data)
 
 
 @app.get('/')
