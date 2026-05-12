@@ -12,6 +12,7 @@ from app.schemas.auth import (
     PasswordChangeResponse,
     ProfileUpdateRequest,
     UserPublic,
+    PermissionsResponse,
 )
 from app.services.auth_service import (
     authenticate_user,
@@ -23,6 +24,7 @@ from app.services.auth_service import (
     to_public_user,
     update_user_profile,
 )
+from app.core.rbac import get_permissions_for_role
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -97,3 +99,17 @@ def change_pwd(
     user = get_user_from_token(credentials.credentials, db=db)
     change_password(user, payload.old_password, payload.new_password, db=db)
     return PasswordChangeResponse(message='Password changed successfully')
+
+
+@router.get('/me/permissions', response_model=PermissionsResponse)
+def get_me_permissions(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> PermissionsResponse:
+    """Get current user's role and permissions."""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Not authenticated')
+
+    user = get_user_from_token(credentials.credentials, db=db)
+    permissions = list(get_permissions_for_role(user.role))
+    return PermissionsResponse(role=user.role, permissions=permissions)

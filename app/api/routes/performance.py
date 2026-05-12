@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import date
 from app.db.database import get_db
-from app.core.rbac import get_current_user, require_permissions
+from app.core.rbac import get_current_user, require_permissions, has_permission
 from app.db.models import User
 from app.services.performance_service import (
     PerformanceService, GoalService, KPIService, TrainingService, CertificationService
@@ -46,7 +46,7 @@ def get_appraisal(
     
     # Access control: user can view their own or if they're a reviewer
     if appraisal.employee_id != current_user.id and appraisal.reviewer_id != current_user.id:
-        if not (current_user.is_admin or current_user.role == 'HR'):
+        if not has_permission(current_user.role, 'manage_performance'):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail='Cannot view this appraisal'
@@ -62,7 +62,7 @@ def get_employee_appraisals(
 ):
     """Get all appraisals for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     appraisals = PerformanceService.get_appraisals_for_employee(db, employee_id)
@@ -126,7 +126,7 @@ def get_goal(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Goal not found')
     
     # Access control
-    if goal.employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if goal.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     return goal
 
@@ -140,7 +140,7 @@ def get_employee_goals(
 ):
     """Get all goals for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     goals = GoalService.get_goals_for_employee(db, employee_id, status)
@@ -204,7 +204,7 @@ def get_kpi(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='KPI not found')
     
     # Access control
-    if kpi.employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if kpi.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     return kpi
 
@@ -218,7 +218,7 @@ def get_employee_kpis(
 ):
     """Get all KPIs for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     kpis = KPIService.get_kpis_for_employee(db, employee_id, status)
@@ -233,7 +233,7 @@ def get_performance_score(
 ):
     """Get weighted performance score for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     score = KPIService.get_employee_performance_score(db, employee_id)
@@ -315,7 +315,7 @@ def get_employee_trainings(
 ):
     """Get all training enrollments for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     trainings = TrainingService.get_trainings_for_employee(db, employee_id)
@@ -349,7 +349,7 @@ def create_certification(
 ):
     """Create a new certification record"""
     # Allow employee to create their own or HR to create for others
-    if payload.employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if payload.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     cert = CertificationService.create_certification(db, payload)
@@ -364,7 +364,7 @@ def get_employee_certifications(
 ):
     """Get all certifications for an employee"""
     # Access control
-    if employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     certs = CertificationService.get_certifications_for_employee(db, employee_id)
@@ -384,7 +384,7 @@ def update_certification(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Certification not found')
     
     # Access control
-    if cert.employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if cert.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     updated = CertificationService.update_certification(db, cert_id, payload)
@@ -403,7 +403,7 @@ def delete_certification(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Certification not found')
     
     # Access control
-    if cert.employee_id != current_user.id and not (current_user.is_admin or current_user.role == 'HR'):
+    if cert.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     success = CertificationService.delete_certification(db, cert_id)

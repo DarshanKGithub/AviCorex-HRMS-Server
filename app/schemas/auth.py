@@ -48,3 +48,8 @@ class AvatarUploadResponse(BaseModel):
 
 class AvatarDeleteResponse(BaseModel):
     message: str
+
+
+class PermissionsResponse(BaseModel):
+    role: str
+    permissions: list[str]
