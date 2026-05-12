@@ -29,6 +29,10 @@ class ProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=120)
 
 
+class RoleUpdateRequest(BaseModel):
+    role: str = Field(min_length=1)
+
+
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(min_length=6)
     new_password: str = Field(min_length=6)
@@ -44,12 +48,3 @@ class AvatarUploadResponse(BaseModel):
 
 class AvatarDeleteResponse(BaseModel):
     message: str
-
-
-class PermissionsResponse(BaseModel):
-    role: str
-    permissions: list[str]
-
-
-class RoleUpdateRequest(BaseModel):
-    role: str = Field(min_length=2, max_length=50)

@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from sqlalchemy import text
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.org import router as org_router
@@ -36,113 +35,23 @@ app.include_router(attendance_router, prefix='/attendance', tags=['attendance'])
 app.include_router(leave_router, prefix='/leave', tags=['leave'])
 app.include_router(payroll_router, prefix='/payroll', tags=['payroll'])
 from app.api.routes.admin import router as admin_router
-from app.api.routes.advanced_attendance import router as adv_attendance_router
-from app.api.routes.engagement import router as engagement_router
-from app.api.routes.todo import router as todo_router
-from app.api.routes.lifecycle import router as lifecycle_router
-
-from app.api.routes.recruitment import router as recruitment_router
-from app.api.routes.documents import router as documents_router
-from app.api.routes.financials import router as financials_router
-from app.api.routes.performance import router as performance_router
-from app.api.routes.notifications import router as notifications_router
-from app.api.routes.workflow import router as workflow_router
-
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
-app.include_router(adv_attendance_router, prefix='/advanced-attendance', tags=['advanced_attendance'])
-app.include_router(engagement_router, prefix='/engagement', tags=['engagement'])
-app.include_router(recruitment_router, prefix='/recruitment', tags=['recruitment'])
-app.include_router(documents_router, prefix='/documents', tags=['documents'])
-app.include_router(financials_router, prefix='/financials', tags=['financials'])
-app.include_router(performance_router, prefix='/performance', tags=['performance'])
-app.include_router(notifications_router, prefix='/notifications', tags=['notifications'])
-app.include_router(workflow_router, prefix='/workflow', tags=['workflow'])
-app.include_router(todo_router, prefix='/todo', tags=['todo'])
-app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
-    _ensure_attendance_columns()
-    _ensure_leave_balance_columns()
-    # Run each seeder in its own session. If one seeder fails, rollback and continue
-    seeders = [
-        seed_demo_users,
-        seed_demo_org,
-        seed_demo_shifts,
-        seed_demo_leave_data,
-        seed_demo_salary_data,
-    ]
-    for seeder in seeders:
-        with SessionLocal() as session:
-            try:
-                seeder(session)
-            except Exception:
-                # ensure session is clean for next seeder
-                try:
-                    session.rollback()
-                except Exception:
-                    pass
-
-
-def _ensure_attendance_columns() -> None:
-    """Backfill older databases that were created before attendance geo columns existed."""
-    required_columns = {
-        'check_in_latitude': 'NUMERIC(10, 8)',
-        'check_in_longitude': 'NUMERIC(11, 8)',
-        'check_out_latitude': 'NUMERIC(10, 8)',
-        'check_out_longitude': 'NUMERIC(11, 8)',
-        'location_verified': 'BOOLEAN NOT NULL DEFAULT FALSE',
-    }
-
-    with engine.begin() as conn:
-        existing = {
-            row[0]
-            for row in conn.execute(
-                text(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name = 'attendance'
-                    """
-                )
-            )
-        }
-
-        for column_name, sql_type in required_columns.items():
-            if column_name in existing:
-                continue
-            conn.execute(text(f"ALTER TABLE attendance ADD COLUMN {column_name} {sql_type}"))
-
-
-def _ensure_leave_balance_columns() -> None:
-    """Backfill older databases that were created before granted_days existed."""
-    required_columns = {
-        'granted_days': 'INTEGER NOT NULL DEFAULT 0',
-    }
-
-    with engine.begin() as conn:
-        existing = {
-            row[0]
-            for row in conn.execute(
-                text(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name = 'leave_balances'
-                    """
-                )
-            )
-        }
-
-        for column_name, sql_type in required_columns.items():
-            if column_name in existing:
-                continue
-            conn.execute(text(f"ALTER TABLE leave_balances ADD COLUMN {column_name} {sql_type}"))
-            if column_name == 'granted_days':
-                conn.execute(text("UPDATE leave_balances SET granted_days = balance_days"))
+    with SessionLocal() as session:
+        seed_demo_users(session)
+        # seed Phase 2 default org data
+        seed_demo_org(session)
+        # seed Phase 4 default shift and rule data
+        seed_demo_shifts(session)
+        # seed Phase 5 leave types and holidays
+        seed_demo_leave_data(session)
+        # seed Phase 6 salary components
+        seed_demo_salary_data(session)
 
 
 @app.get('/')
