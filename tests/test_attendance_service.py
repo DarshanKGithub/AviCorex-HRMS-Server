@@ -256,6 +256,51 @@ def test_check_in_updates_existing_record(db_session):
     assert result.check_in_time == check_in_time
 
 
+def test_check_in_succeeds_when_audit_log_write_fails(db_session, monkeypatch):
+    """Test check-in still succeeds if audit logging fails after commit."""
+    emp = Employee(full_name='Eve', email='eve@test.com')
+    db_session.add(emp)
+    db_session.commit()
+    db_session.refresh(emp)
+
+    shift = Shift(
+        name='Morning',
+        start_time=time(9, 0),
+        end_time=time(18, 0),
+        grace_period_minutes=5,
+    )
+    db_session.add(shift)
+    db_session.commit()
+    db_session.refresh(shift)
+
+    assignment = EmployeeShiftAssignment(
+        employee_id=emp.id,
+        shift_id=shift.id,
+        start_date=date(2024, 5, 1),
+        is_active=True,
+    )
+    db_session.add(assignment)
+    db_session.commit()
+
+    class FailingAuditLog:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError('audit log unavailable')
+
+    monkeypatch.setattr('app.db.models.AuditLog', FailingAuditLog)
+
+    request = CheckInRequest(
+        employee_id=emp.id,
+        attendance_date=date(2024, 5, 1),
+        check_in_time=datetime(2024, 5, 1, 9, 10, tzinfo=timezone.utc),
+    )
+
+    result = check_in(request, db_session)
+
+    assert result.employee_id == emp.id
+    assert result.status == 'present'
+    assert db_session.query(Attendance).filter(Attendance.employee_id == emp.id).count() == 1
+
+
 def test_check_out_with_check_in(db_session):
     """Test check-out updates attendance with working hours."""
     emp = Employee(full_name='Carol', email='carol@test.com')

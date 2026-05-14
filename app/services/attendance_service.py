@@ -1,6 +1,7 @@
 """Service for managing attendance and applying attendance rules."""
 
 from datetime import datetime, date as date_type, timezone, timedelta
+import logging
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,9 @@ from app.schemas.attendance import (
 )
 from app.services.shift_service import get_employee_current_shift
 from fastapi import HTTPException, status
+
+
+logger = logging.getLogger(__name__)
 
 
 class AttendanceRuleEngine:
@@ -425,18 +429,25 @@ def _write_attendance_audit_log(db: Session, action: str, attendance: Attendance
     from app.db.models import AuditLog
     import json
 
-    log = AuditLog(
-        actor_id=None,  # Could be set from request context
-        action=action,
-        object_type='Attendance',
-        object_id=attendance.id,
-        data=json.dumps({
-            'employee_id': attendance.employee_id,
-            'attendance_date': attendance.attendance_date.isoformat(),
-            'status': attendance.status,
-            'is_late': attendance.is_late,
-            'is_half_day': attendance.is_half_day,
-        }),
-    )
-    db.add(log)
-    db.commit()
+    try:
+        log = AuditLog(
+            actor_id=None,  # Could be set from request context
+            action=action,
+            object_type='Attendance',
+            object_id=attendance.id,
+            data=json.dumps({
+                'employee_id': attendance.employee_id,
+                'attendance_date': attendance.attendance_date.isoformat(),
+                'status': attendance.status,
+                'is_late': attendance.is_late,
+                'is_half_day': attendance.is_half_day,
+            }),
+        )
+        db.add(log)
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception('Failed to write attendance audit log for %s %s', action, attendance.id)
