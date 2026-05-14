@@ -47,6 +47,26 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
 
+    # Optional: run automatic backfill of missing columns when expressly enabled.
+    # Set environment variable AUTO_APPLY_SCHEMA_CHANGES=true in deploy only if you
+    # explicitly want runtime schema backfill (not recommended for regular deploys).
+    from os import getenv
+    if getenv('AUTO_APPLY_SCHEMA_CHANGES', 'false').lower() in ('1', 'true', 'yes'):
+        try:
+            from app.fix_db import backfill_columns
+        except Exception:
+            # fallback to top-level fix_db script
+            try:
+                from fix_db import backfill_columns
+            except Exception:
+                backfill_columns = None
+
+        if backfill_columns:
+            try:
+                backfill_columns()
+            except Exception:
+                logger.exception('Automatic schema backfill failed; continuing startup')
+
     def run_seed_step(session, step_name: str, step_fn) -> None:
         try:
             step_fn(session)

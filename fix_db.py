@@ -25,7 +25,11 @@ def backfill_columns():
                     # We just use basic types for alter table to avoid complex default expressions
                     print(f"Adding missing column: {table_name}.{column.name} type: {col_type}")
                     try:
-                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column.name} {col_type}"))
+                        # Use a safe conditional add for Postgres; fallback to plain ALTER otherwise
+                        if engine.dialect.name == 'postgresql':
+                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column.name} {col_type}"))
+                        else:
+                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column.name} {col_type}"))
                     except Exception as e:
                         print(f"Failed to add column {table_name}.{column.name}: {e}")
 
