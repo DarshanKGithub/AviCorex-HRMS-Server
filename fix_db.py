@@ -1,8 +1,10 @@
 import sys
 from pathlib import Path
 
-backend_dir = Path("/home/darshan-kshetri/Desktop/Client_Works/HRMS/Backend")
-sys.path.append(str(backend_dir))
+# Ensure imports work regardless of where this script is executed from.
+backend_dir = Path(__file__).resolve().parent
+if str(backend_dir) not in sys.path:
+    sys.path.append(str(backend_dir))
 
 from sqlalchemy import inspect, text
 from app.db.database import engine
