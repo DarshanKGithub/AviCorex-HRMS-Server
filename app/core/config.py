@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     algorithm: str = 'HS256'
     access_token_expire_minutes: int = 480
     database_url: str = 'sqlite:///./hrms.db'
-    frontend_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,https://avi-corex-hrms-ui.vercel.app/'
+    frontend_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,https://avi-corex-hrms-ui.vercel.app/,https://hrms.greatertechhub.com'
 
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
