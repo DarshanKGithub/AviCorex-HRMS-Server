@@ -1,3 +1,4 @@
+from datetime import date
 from typing import List, Tuple
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
@@ -5,8 +6,9 @@ from fastapi import HTTPException, status
 from uuid import uuid4
 from sqlalchemy import text
 
-from app.db.models import Employee
-from app.schemas.employee import EmployeeCreate, EmployeeUpdate
+from app.core.security import hash_password
+from app.db.models import Employee, User, LeaveType, LeaveBalance
+from app.schemas.employee import EmployeeCreate, EmployeeCreateWithAccount, EmployeeUpdate, ALLOWED_PROVISION_ROLES
 
 
 def list_employees(db: Session) -> List[Employee]:
@@ -43,46 +45,165 @@ def get_employee(employee_id: str, db: Session) -> Employee:
     return emp
 
 
-def create_employee(payload: EmployeeCreate, db: Session, actor_id: str | None = None) -> Employee:
-    existing = db.scalar(select(Employee).where(Employee.email == payload.email))
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee with this email exists')
-    # validate manager exists if provided and prevent cycles
-    new_id = str(uuid4())
-    if payload.manager_id:
-        mgr = db.scalar(select(Employee).where(Employee.id == payload.manager_id))
-        if not mgr:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Manager not found')
+def _validate_manager_for_new_employee(db: Session, manager_id: str | None, new_id: str) -> None:
+    if not manager_id:
+        return
+    mgr = db.scalar(select(Employee).where(Employee.id == manager_id))
+    if not mgr:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Manager not found')
 
-        # walk up manager chain to ensure we don't encounter the new id (would create a cycle)
-        current = payload.manager_id
-        seen = set()
-        while current:
-            if current in seen:
-                break
-            seen.add(current)
-            if current == new_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Manager assignment would create a cycle')
-            current = db.scalar(select(Employee.manager_id).where(Employee.id == current))
+    current = manager_id
+    seen: set[str] = set()
+    while current:
+        if current in seen:
+            break
+        seen.add(current)
+        if current == new_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Manager assignment would create a cycle')
+        current = db.scalar(select(Employee.manager_id).where(Employee.id == current))
 
-    emp = Employee(
-        id=new_id,
-        full_name=payload.full_name,
-        email=payload.email.lower(),
+
+def _employee_from_payload(payload: EmployeeCreate, employee_id: str) -> Employee:
+    return Employee(
+        id=employee_id,
+        full_name=payload.full_name.strip(),
+        email=payload.email.lower().strip(),
+        phone=payload.phone,
+        date_of_birth=payload.date_of_birth,
+        gender=payload.gender,
+        personal_email=payload.personal_email,
+        address=payload.address,
+        city=payload.city,
+        state=payload.state,
+        zip_code=payload.zip_code,
+        country=payload.country,
+        emergency_contact_name=payload.emergency_contact_name,
+        emergency_contact_phone=payload.emergency_contact_phone,
+        emergency_contact_relationship=payload.emergency_contact_relationship,
+        bank_account_number=payload.bank_account_number,
+        bank_ifsc_code=payload.bank_ifsc_code,
+        pan_number=payload.pan_number,
+        aadhar_number=payload.aadhar_number,
         department_id=payload.department_id,
         designation_id=payload.designation_id,
         manager_id=payload.manager_id,
+        joining_date=payload.joining_date,
+        date_of_confirmation=payload.date_of_confirmation,
     )
-    db.add(emp)
-    db.commit()
-    db.refresh(emp)
-    # audit
+
+
+def _provision_leave_balances(employee_id: str, db: Session) -> None:
+    current_year = date.today().year
+    leave_types = db.scalars(select(LeaveType).where(LeaveType.is_active.is_(True))).all()
+    for leave_type in leave_types:
+        existing = db.scalar(
+            select(LeaveBalance).where(
+                LeaveBalance.employee_id == employee_id,
+                LeaveBalance.leave_type_id == leave_type.id,
+                LeaveBalance.year == current_year,
+            )
+        )
+        if existing:
+            continue
+        granted = leave_type.default_days_per_year or 0
+        db.add(
+            LeaveBalance(
+                employee_id=employee_id,
+                leave_type_id=leave_type.id,
+                year=current_year,
+                granted_days=granted,
+                balance_days=granted,
+            )
+        )
+
+
+def _audit_employee_action(db: Session, actor_id: str | None, action: str, emp: Employee, extra: dict | None = None) -> None:
     try:
         from app.db.models import AuditLog
-        db.add(AuditLog(actor_id=actor_id, action='create', object_type='employee', object_id=emp.id, data=str({'full_name': emp.full_name, 'email': emp.email})))
+
+        data = {'full_name': emp.full_name, 'email': emp.email}
+        if extra:
+            data.update(extra)
+        db.add(
+            AuditLog(
+                actor_id=actor_id,
+                action=action,
+                object_type='employee',
+                object_id=emp.id,
+                data=str(data),
+            )
+        )
         db.commit()
     except Exception:
         db.rollback()
+
+
+def create_employee(payload: EmployeeCreate, db: Session, actor_id: str | None = None) -> Employee:
+    """Create employee with linked login (preferred for Admin/HR provisioning)."""
+    if isinstance(payload, EmployeeCreateWithAccount):
+        return create_employee_with_account(payload, db, actor_id)
+
+    # Legacy path: employee record only (no login) — kept for backward compatibility in tests
+    email = payload.email.lower().strip()
+    existing = db.scalar(select(Employee).where(Employee.email == email))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee with this email exists')
+    new_id = str(uuid4())
+    _validate_manager_for_new_employee(db, payload.manager_id, new_id)
+    emp = _employee_from_payload(payload, new_id)
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+    _provision_leave_balances(emp.id, db)
+    db.commit()
+    _audit_employee_action(db, actor_id, 'create', emp)
+    return emp
+
+
+def create_employee_with_account(
+    payload: EmployeeCreateWithAccount,
+    db: Session,
+    actor_id: str | None = None,
+) -> Employee:
+    email = payload.email.lower().strip()
+    role = (payload.role or 'Employee').strip()
+
+    if role not in ALLOWED_PROVISION_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Invalid role. Allowed roles: {", ".join(ALLOWED_PROVISION_ROLES)}',
+        )
+
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A login account with this email already exists')
+    if db.scalar(select(Employee).where(Employee.email == email)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='An employee with this email already exists')
+
+    new_id = str(uuid4())
+    _validate_manager_for_new_employee(db, payload.manager_id, new_id)
+
+    user = User(
+        id=new_id,
+        full_name=payload.full_name.strip(),
+        email=email,
+        role=role,
+        password_hash=hash_password(payload.password),
+        is_active=True,
+    )
+    emp = _employee_from_payload(payload, new_id)
+
+    try:
+        db.add(user)
+        db.add(emp)
+        db.commit()
+        db.refresh(emp)
+        _provision_leave_balances(emp.id, db)
+        db.commit()
+        _audit_employee_action(db, actor_id, 'create', emp, extra={'role': role, 'login_created': True})
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unable to create employee account') from exc
+
     return emp
 
 
@@ -122,6 +243,9 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
         emp.manager_id = payload.manager_id
     if payload.is_active is not None:
         emp.is_active = payload.is_active
+        linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
+        if linked_user:
+            linked_user.is_active = payload.is_active
 
     db.commit()
     db.refresh(emp)
@@ -141,6 +265,9 @@ def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) 
         # record audit before delete
         from app.db.models import AuditLog
         db.add(AuditLog(actor_id=actor_id, action='delete', object_type='employee', object_id=emp.id, data=str({'full_name': emp.full_name, 'email': emp.email})))
+        linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
+        if linked_user:
+            db.delete(linked_user)
         db.delete(emp)
         db.commit()
     except Exception:

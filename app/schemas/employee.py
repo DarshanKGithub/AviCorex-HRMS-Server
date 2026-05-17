@@ -3,6 +3,9 @@ from typing import Literal, Optional
 from datetime import date
 
 
+ALLOWED_PROVISION_ROLES = ('Employee', 'Worker', 'Manager')
+
+
 class EmployeeCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=120)
     email: str
@@ -27,6 +30,12 @@ class EmployeeCreate(BaseModel):
     manager_id: Optional[str] = None
     joining_date: Optional[date] = None
     date_of_confirmation: Optional[date] = None
+
+
+class EmployeeCreateWithAccount(EmployeeCreate):
+    """Create employee master record and linked login account (Admin/HR)."""
+    password: str = Field(min_length=6, max_length=128)
+    role: str = Field(default='Employee', description='Login role: Employee, Worker, or Manager')
 
 
 class EmployeeUpdate(BaseModel):
@@ -81,6 +90,11 @@ class EmployeePublic(BaseModel):
     joining_date: Optional[date] = None
     date_of_confirmation: Optional[date] = None
     is_active: bool
+
+
+class EmployeePublicWithAccount(EmployeePublic):
+    role: str
+    login_created: bool = True
 
 
 class PaginatedEmployees(BaseModel):

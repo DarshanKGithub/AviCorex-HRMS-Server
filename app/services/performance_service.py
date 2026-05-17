@@ -349,9 +349,18 @@ class CertificationService:
     """Service for certification management"""
 
     @staticmethod
+    def _generate_verification_id() -> str:
+        return f'CERT-{uuid4().hex[:8].upper()}'
+
+    @staticmethod
     def create_certification(db: Session, payload: CertificationCreate) -> Certification:
+        verification_id = CertificationService._generate_verification_id()
+        while db.query(Certification).filter(Certification.verification_id == verification_id).first():
+            verification_id = CertificationService._generate_verification_id()
+
         cert = Certification(
             id=str(uuid4()),
+            verification_id=verification_id,
             employee_id=payload.employee_id,
             name=payload.name,
             issuing_authority=payload.issuing_authority,
@@ -366,6 +375,10 @@ class CertificationService:
     @staticmethod
     def get_certification(db: Session, cert_id: str) -> Certification:
         return db.query(Certification).filter(Certification.id == cert_id).first()
+
+    @staticmethod
+    def get_certification_by_verification_id(db: Session, verification_id: str) -> Certification | None:
+        return db.query(Certification).filter(Certification.verification_id == verification_id).first()
 
     @staticmethod
     def get_certifications_for_employee(db: Session, employee_id: str) -> list[Certification]:

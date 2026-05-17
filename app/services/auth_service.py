@@ -85,16 +85,23 @@ def delete_user_avatar(user_id: str) -> bool:
     return True
 
 
+def resolve_employee_id(user: User, db: Session) -> str | None:
+    """Resolve employee record id for a user (shared id or email link)."""
+    emp = db.scalar(select(Employee).where(Employee.id == user.id))
+    if emp:
+        return emp.id
+    emp = db.scalar(select(Employee).where(Employee.email == user.email.lower()))
+    return emp.id if emp else None
+
+
 def to_public_user(user: User, db: Session | None = None) -> UserPublic:
     """Return public user payload including optional linked employee_id (if exists)."""
     emp_id: str | None = None
-    try:
-        if db is not None:
-            emp = db.scalar(select(Employee).where(Employee.email == user.email))
-            if emp:
-                emp_id = emp.id
-    except Exception:
-        emp_id = None
+    if db is not None:
+        try:
+            emp_id = resolve_employee_id(user, db)
+        except Exception:
+            emp_id = None
 
     return UserPublic(
         id=user.id,

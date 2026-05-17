@@ -178,9 +178,21 @@ class CertificationUpdate(BaseModel):
 
 class CertificationPublic(CertificationBase):
     id: str
+    verification_id: Optional[str] = None
     employee_id: str
     created_at: datetime
     is_expired: Optional[bool] = False
 
     class Config:
         from_attributes = True
+
+
+class CertificationVerifyPublic(BaseModel):
+    verification_id: str
+    name: str
+    issuing_authority: str
+    issue_date: date
+    expiry_date: Optional[date] = None
+    employee_id: str
+    is_expired: Optional[bool] = False
+    is_valid: bool = True

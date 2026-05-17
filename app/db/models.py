@@ -764,6 +764,7 @@ class EmployeeTraining(Base):
 class Certification(Base):
     __tablename__ = 'certifications'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    verification_id: Mapped[str | None] = mapped_column(String(20), unique=True, index=True, nullable=True)
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     issuing_authority: Mapped[str] = mapped_column(String(120), nullable=False)

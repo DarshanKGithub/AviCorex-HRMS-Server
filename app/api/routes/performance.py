@@ -12,7 +12,7 @@ from app.schemas.performance import (
     GoalCreate, GoalUpdate, GoalPublic,
     KPICreate, KPIUpdate, KPIPublic,
     EmployeeTrainingCreate, EmployeeTrainingUpdate, EmployeeTrainingPublic,
-    CertificationCreate, CertificationUpdate, CertificationPublic,
+    CertificationCreate, CertificationUpdate, CertificationPublic, CertificationVerifyPublic,
     TrainingCourseCreate, TrainingCourseUpdate, TrainingCoursePublic
 )
 
@@ -66,7 +66,7 @@ def get_employee_appraisals(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     appraisals = PerformanceService.get_appraisals_for_employee(db, employee_id)
-    return [PerformanceAppraisalPublic.from_orm(a) for a in appraisals]
+    return [PerformanceAppraisalPublic.model_validate(a, from_attributes=True) for a in appraisals]
 
 
 @router.put('/appraisals/{appraisal_id}', response_model=PerformanceAppraisalPublic)
@@ -107,11 +107,12 @@ def create_goal(
     payload: GoalCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    _: None = Depends(require_permissions('manage_performance'))
 ):
-    """Create a new goal"""
+    """Create a new goal for self or as HR/manager for others."""
+    if payload.employee_id != current_user.id and not has_permission(current_user.role, 'manage_performance'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     goal = GoalService.create_goal(db, payload)
-    return goal
+    return GoalPublic.model_validate(goal, from_attributes=True)
 
 
 @router.get('/goals/{goal_id}', response_model=GoalPublic)
@@ -144,7 +145,7 @@ def get_employee_goals(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     goals = GoalService.get_goals_for_employee(db, employee_id, status)
-    return [GoalPublic.from_orm(g) for g in goals]
+    return [GoalPublic.model_validate(g, from_attributes=True) for g in goals]
 
 
 @router.put('/goals/{goal_id}', response_model=GoalPublic)
@@ -222,7 +223,7 @@ def get_employee_kpis(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     kpis = KPIService.get_kpis_for_employee(db, employee_id, status)
-    return [KPIPublic.from_orm(k) for k in kpis]
+    return [KPIPublic.model_validate(k, from_attributes=True) for k in kpis]
 
 
 @router.get('/performance-score/{employee_id}')
@@ -292,7 +293,7 @@ def get_all_courses(
 ):
     """Get all training courses"""
     courses = TrainingService.get_all_courses(db)
-    return [TrainingCoursePublic.from_orm(c) for c in courses]
+    return [TrainingCoursePublic.model_validate(c, from_attributes=True) for c in courses]
 
 
 @router.post('/training/enrollments', response_model=EmployeeTrainingPublic)
@@ -319,7 +320,7 @@ def get_employee_trainings(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     trainings = TrainingService.get_trainings_for_employee(db, employee_id)
-    return [EmployeeTrainingPublic.from_orm(t) for t in trainings]
+    return [EmployeeTrainingPublic.model_validate(t, from_attributes=True) for t in trainings]
 
 
 @router.put('/training/enrollments/{training_id}', response_model=EmployeeTrainingPublic)
@@ -353,7 +354,35 @@ def create_certification(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     cert = CertificationService.create_certification(db, payload)
-    return cert
+    is_expired = bool(cert.expiry_date and cert.expiry_date < date.today())
+    return CertificationPublic.model_validate(
+        {**cert.__dict__, 'is_expired': is_expired},
+        from_attributes=True,
+    )
+
+
+@router.get('/certifications/verify/{verification_id}', response_model=CertificationVerifyPublic)
+def verify_certification(
+    verification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Verify a certification by its unique verification ID."""
+    cert = CertificationService.get_certification_by_verification_id(db, verification_id.upper())
+    if not cert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Certification not found')
+
+    is_expired = bool(cert.expiry_date and cert.expiry_date < date.today())
+    return CertificationVerifyPublic(
+        verification_id=cert.verification_id,
+        name=cert.name,
+        issuing_authority=cert.issuing_authority,
+        issue_date=cert.issue_date,
+        expiry_date=cert.expiry_date,
+        employee_id=cert.employee_id,
+        is_expired=is_expired,
+        is_valid=not is_expired,
+    )
 
 
 @router.get('/certifications/employee/{employee_id}')
@@ -368,7 +397,14 @@ def get_employee_certifications(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Unauthorized')
     
     certs = CertificationService.get_certifications_for_employee(db, employee_id)
-    return [CertificationPublic.from_orm(c) for c in certs]
+    today = date.today()
+    return [
+        CertificationPublic.model_validate(
+            {**c.__dict__, 'is_expired': bool(c.expiry_date and c.expiry_date < today)},
+            from_attributes=True,
+        )
+        for c in certs
+    ]
 
 
 @router.put('/certifications/{cert_id}', response_model=CertificationPublic)

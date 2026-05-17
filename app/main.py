@@ -8,8 +8,18 @@ from app.api.routes.org import router as org_router
 from app.api.routes.employees import router as employees_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.attendance import router as attendance_router
+from app.api.routes.advanced_attendance import router as advanced_attendance_router
 from app.api.routes.leave import router as leave_router
 from app.api.routes.payroll import router as payroll_router
+from app.api.routes.engagement import router as engagement_router
+from app.api.routes.performance import router as performance_router
+from app.api.routes.todo import router as todo_router
+from app.api.routes.recruitment import router as recruitment_router
+from app.api.routes.financials import router as financials_router
+from app.api.routes.notifications import router as notifications_router
+from app.api.routes.workflow import router as workflow_router
+from app.api.routes.documents import router as documents_router
+from app.api.routes.lifecycle import router as lifecycle_router
 from app.core.config import settings
 from app.db.database import engine, SessionLocal
 from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
@@ -36,8 +46,18 @@ app.include_router(org_router, prefix='/org', tags=['org'])
 app.include_router(employees_router, prefix='/employees', tags=['employees'])
 app.include_router(dashboard_router, prefix='/dashboard', tags=['dashboard'])
 app.include_router(attendance_router, prefix='/attendance', tags=['attendance'])
+app.include_router(advanced_attendance_router, prefix='/advanced-attendance', tags=['advanced-attendance'])
 app.include_router(leave_router, prefix='/leave', tags=['leave'])
 app.include_router(payroll_router, prefix='/payroll', tags=['payroll'])
+app.include_router(engagement_router, prefix='/engagement', tags=['engagement'])
+app.include_router(performance_router)
+app.include_router(todo_router, prefix='/todo', tags=['todo'])
+app.include_router(recruitment_router, prefix='/recruitment', tags=['recruitment'])
+app.include_router(financials_router, prefix='/financials', tags=['financials'])
+app.include_router(notifications_router, prefix='/notifications', tags=['notifications'])
+app.include_router(workflow_router, prefix='/workflow', tags=['workflow'])
+app.include_router(documents_router, prefix='/documents', tags=['documents'])
+app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 from app.api.routes.admin import router as admin_router
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')

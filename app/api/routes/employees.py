@@ -1,10 +1,17 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.rbac import require_permissions
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.employee import EmployeeCreate, EmployeePublic, EmployeeUpdate, PaginatedEmployees
+from app.schemas.employee import (
+    EmployeeCreateWithAccount,
+    EmployeePublic,
+    EmployeePublicWithAccount,
+    EmployeeUpdate,
+    PaginatedEmployees,
+)
 from app.services.employee_service import search_employees, create_employee, get_employee, update_employee, delete_employee
 from app.services.employee_service import get_manager_chain
 
@@ -31,22 +38,23 @@ def employees(page: int = 1, size: int = 20, q: str | None = None, department_id
     )
 
 
-@router.post('/', response_model=EmployeePublic)
+def _to_employee_public(employee) -> EmployeePublic:
+    return EmployeePublic.model_validate(employee, from_attributes=True)
+
+
+@router.post('/', response_model=EmployeePublicWithAccount)
 def create(
-    payload: EmployeeCreate,
+    payload: EmployeeCreateWithAccount,
     user: User = Depends(require_permissions('create_employee')),
     db: Session = Depends(get_db),
 ):
-
     e = create_employee(payload=payload, db=db, actor_id=user.id)
-    return EmployeePublic(
-        id=e.id,
-        full_name=e.full_name,
-        email=e.email,
-        department_id=e.department_id,
-        designation_id=e.designation_id,
-        manager_id=e.manager_id,
-        is_active=e.is_active,
+    linked_user = db.scalar(select(User).where(User.id == e.id))
+    public = _to_employee_public(e)
+    return EmployeePublicWithAccount(
+        **public.model_dump(),
+        role=linked_user.role if linked_user else payload.role,
+        login_created=linked_user is not None,
     )
 
 
@@ -116,7 +124,10 @@ def upload_document(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if employee_id != user.id and not has_permission(user.role, 'edit_employee'):
+    from app.services.auth_service import resolve_employee_id
+
+    own_employee_id = resolve_employee_id(user, db)
+    if employee_id != own_employee_id and not has_permission(user.role, 'edit_employee'):
         raise HTTPException(status_code=403, detail="Not authorized to upload documents for this employee")
 
     file_id = str(uuid4())
