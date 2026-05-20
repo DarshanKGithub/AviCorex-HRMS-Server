@@ -209,8 +209,11 @@ def create_employee_with_account(
 
 def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, actor_id: str | None = None) -> Employee:
     emp = get_employee(employee_id, db)
+    linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
     if payload.full_name is not None:
         emp.full_name = payload.full_name
+        if linked_user:
+            linked_user.full_name = payload.full_name.strip()
     if payload.department_id is not None:
         emp.department_id = payload.department_id
     if payload.designation_id is not None:
@@ -243,7 +246,6 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
         emp.manager_id = payload.manager_id
     if payload.is_active is not None:
         emp.is_active = payload.is_active
-        linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
         if linked_user:
             linked_user.is_active = payload.is_active
 
@@ -262,15 +264,77 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
 def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) -> Employee:
     emp = get_employee(employee_id, db)
     try:
-        # record audit before delete
-        from app.db.models import AuditLog
+        from app.db.models import (
+            AuditLog, EmployeeShiftAssignment, Attendance, LeaveBalance, LeaveRequest,
+            TodoItem, GatePass, Salary, EmployeeSalaryComponent, Payslip, SalaryHistory,
+            Timesheet, OvertimeRequest, AttendanceRegularization, CompOffRequest, BiometricLog,
+            RosterEntry, PerformanceAppraisal, Goal, KPI, EmployeeTraining, Certification,
+            HelpdeskTicket, EmployeeGrievance, EmployeeDocument, OfferLetter, OnboardingPlan,
+            ExitCase, AssetInventory, SalaryStructure, Reimbursement, EmployeeLoan,
+            SurveyResponse, Feedback
+        )
+
+        # Delete all related records in correct order to respect foreign key constraints
+        # Delete tables that reference this employee
+        db.query(EmployeeShiftAssignment).filter(EmployeeShiftAssignment.employee_id == employee_id).delete()
+        db.query(Attendance).filter(Attendance.employee_id == employee_id).delete()
+        db.query(LeaveRequest).filter(LeaveRequest.employee_id == employee_id).delete()
+        db.query(LeaveBalance).filter(LeaveBalance.employee_id == employee_id).delete()
+        db.query(TodoItem).filter(TodoItem.employee_id == employee_id).delete()
+        db.query(GatePass).filter(GatePass.employee_id == employee_id).delete()
+        db.query(EmployeeSalaryComponent).filter(EmployeeSalaryComponent.employee_id == employee_id).delete()
+        db.query(Payslip).filter(Payslip.employee_id == employee_id).delete()
+        db.query(SalaryHistory).filter(SalaryHistory.employee_id == employee_id).delete()
+        db.query(Salary).filter(Salary.employee_id == employee_id).delete()
+        db.query(Timesheet).filter(Timesheet.employee_id == employee_id).delete()
+        db.query(OvertimeRequest).filter(OvertimeRequest.employee_id == employee_id).delete()
+        db.query(AttendanceRegularization).filter(AttendanceRegularization.employee_id == employee_id).delete()
+        db.query(CompOffRequest).filter(CompOffRequest.employee_id == employee_id).delete()
+        db.query(BiometricLog).filter(BiometricLog.employee_id == employee_id).delete()
+        db.query(RosterEntry).filter(RosterEntry.employee_id == employee_id).delete()
+        db.query(PerformanceAppraisal).filter(PerformanceAppraisal.employee_id == employee_id).delete()
+        db.query(Goal).filter(Goal.employee_id == employee_id).delete()
+        db.query(KPI).filter(KPI.employee_id == employee_id).delete()
+        db.query(EmployeeTraining).filter(EmployeeTraining.employee_id == employee_id).delete()
+        db.query(Certification).filter(Certification.employee_id == employee_id).delete()
+        db.query(HelpdeskTicket).filter(HelpdeskTicket.employee_id == employee_id).delete()
+        db.query(EmployeeDocument).filter(EmployeeDocument.employee_id == employee_id).delete()
+        db.query(OfferLetter).filter(OfferLetter.employee_id == employee_id).delete()
+        db.query(OnboardingPlan).filter(OnboardingPlan.employee_id == employee_id).delete()
+        db.query(ExitCase).filter(ExitCase.employee_id == employee_id).delete()
+        db.query(AssetInventory).filter(AssetInventory.employee_id == employee_id).delete()
+        db.query(SalaryStructure).filter(SalaryStructure.employee_id == employee_id).delete()
+        db.query(Reimbursement).filter(Reimbursement.employee_id == employee_id).delete()
+        db.query(EmployeeLoan).filter(EmployeeLoan.employee_id == employee_id).delete()
+        db.query(SurveyResponse).filter(SurveyResponse.employee_id == employee_id).delete()
+
+        # Handle grievances where employee is involved
+        db.query(EmployeeGrievance).filter(EmployeeGrievance.employee_id == employee_id).delete()
+        db.query(EmployeeGrievance).filter(EmployeeGrievance.against_employee_id == employee_id).delete()
+
+        # Handle feedback/appraisals where employee is reviewer
+        db.query(Feedback).filter(Feedback.employee_id == employee_id).delete()
+        db.query(Feedback).filter(Feedback.reviewer_id == employee_id).delete()
+        db.query(PerformanceAppraisal).filter(PerformanceAppraisal.reviewer_id == employee_id).delete()
+
+        # Handle grievances with investigator
+        db.query(EmployeeGrievance).filter(EmployeeGrievance.investigator_id == employee_id).delete()
+
+        # Update any employees who had this employee as their manager (set manager to NULL)
+        db.query(Employee).filter(Employee.manager_id == employee_id).update({Employee.manager_id: None})
+
+        # Record audit before delete
         db.add(AuditLog(actor_id=actor_id, action='delete', object_type='employee', object_id=emp.id, data=str({'full_name': emp.full_name, 'email': emp.email})))
+
+        # Delete linked user account
         linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
         if linked_user:
             db.delete(linked_user)
+
+        # Delete the employee
         db.delete(emp)
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
         raise
     return emp
