@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, verify_password
-from app.db.models import User, Employee
+from app.db.models import User, Employee, Tenant, TenantFeature
 from app.schemas.auth import LoginResponse, UserPublic
 
 
@@ -103,6 +103,43 @@ def to_public_user(user: User, db: Session | None = None) -> UserPublic:
         except Exception:
             emp_id = None
 
+    tenant_id: str | None = None
+    tenant_obj: dict | None = None
+    entitlements: list[str] = []
+
+    if db is not None:
+        try:
+            # Prefer explicit binding via `user.tenant_id` when available.
+            if getattr(user, 'tenant_id', None):
+                t = db.scalar(select(Tenant).where(Tenant.id == user.tenant_id))
+                if t:
+                    tenant_id = t.id
+                    tenant_obj = {"id": t.id, "name": t.name, "domain": t.domain}
+                    try:
+                        rows = db.query(TenantFeature).filter(TenantFeature.tenant_id == t.id, TenantFeature.enabled == True).all()
+                        entitlements = [r.feature_key for r in rows]
+                    except Exception:
+                        entitlements = []
+            else:
+                # Fallback: try resolving tenant by email domain (simple mapping). Tenants should set `domain`.
+                parts = user.email.split('@')
+                if len(parts) == 2:
+                    domain = parts[1].lower()
+                    t = db.scalar(select(Tenant).where(Tenant.domain == domain))
+                    if t:
+                        tenant_id = t.id
+                        tenant_obj = {"id": t.id, "name": t.name, "domain": t.domain}
+                        # Load tenant feature flags
+                        try:
+                            rows = db.query(TenantFeature).filter(TenantFeature.tenant_id == t.id, TenantFeature.enabled == True).all()
+                            entitlements = [r.feature_key for r in rows]
+                        except Exception:
+                            entitlements = []
+        except Exception:
+            tenant_id = None
+            tenant_obj = None
+            entitlements = []
+
     return UserPublic(
         id=user.id,
         full_name=user.full_name,
@@ -110,6 +147,9 @@ def to_public_user(user: User, db: Session | None = None) -> UserPublic:
         role=user.role,
         employee_id=emp_id,
         avatar_url=get_avatar_url(user.id),
+        tenant_id=tenant_id,
+        tenant=tenant_obj,
+        entitlements=entitlements,
     )
 
 

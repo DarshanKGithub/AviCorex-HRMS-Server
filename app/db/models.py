@@ -1,7 +1,7 @@
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, String, Date, Numeric
+from sqlalchemy import Boolean, DateTime, String, Date, Numeric, select, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from app.core.security import hash_password
@@ -15,6 +15,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     role: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
+    # relationship to Tenant added later (Tenant class defined below)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -36,6 +38,24 @@ def seed_demo_users(db: Session) -> None:
     existing_emails = {email for (email,) in existing_emails}
     created = False
 
+    # Ensure a demo tenant exists and assign seeded users to it
+    try:
+        demo_tenant = db.scalar(select(Tenant).where(Tenant.name == 'Demo Tenant'))
+    except Exception:
+        demo_tenant = None
+
+    if demo_tenant is None:
+        demo_tenant = Tenant(name='Demo Tenant', domain='demo.hrms')
+        db.add(demo_tenant)
+        try:
+            db.commit()
+            db.refresh(demo_tenant)
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
     for full_name, email, role in SEED_USERS:
         normalized_email = email.lower()
         if normalized_email in existing_emails:
@@ -50,6 +70,7 @@ def seed_demo_users(db: Session) -> None:
                 full_name=full_name,
                 email=normalized_email,
                 role=role,
+                tenant_id=demo_tenant.id if demo_tenant else None,
                 password_hash=hash_password('Hrms@12345'),
             )
         )
@@ -79,8 +100,95 @@ def seed_demo_users(db: Session) -> None:
                 pass
 
 
+# --- Tenancy & Subscription models ---
+
+
+class Tenant(Base):
+    __tablename__ = 'tenants'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    domain: Mapped[str] = mapped_column(String(255), nullable=True, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    subscriptions: Mapped[list['Subscription']] = relationship('Subscription', back_populates='tenant', cascade='all, delete-orphan')
+
+
+class Plan(Base):
+    __tablename__ = 'plans'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    billing_period: Mapped[str] = mapped_column(String(20), nullable=False, default='monthly')
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    subscriptions: Mapped[list['Subscription']] = relationship('Subscription', back_populates='plan', cascade='all, delete-orphan')
+    features: Mapped[list['PlanFeature']] = relationship('PlanFeature', back_populates='plan', cascade='all, delete-orphan')
+
+
+class PlanFeature(Base):
+    __tablename__ = 'plan_features'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey('plans.id'), nullable=False, index=True)
+    feature_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    plan: Mapped['Plan'] = relationship('Plan', back_populates='features', lazy='joined')
+
+
+class FeaturePackage(Base):
+    __tablename__ = 'feature_packages'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    features: Mapped[list['FeaturePackageFeature']] = relationship('FeaturePackageFeature', back_populates='package', cascade='all, delete-orphan')
+
+
+class FeaturePackageFeature(Base):
+    __tablename__ = 'feature_package_features'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey('feature_packages.id'), nullable=False, index=True)
+    feature_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    package: Mapped['FeaturePackage'] = relationship('FeaturePackage', back_populates='features', lazy='joined')
+
+
+class Subscription(Base):
+    __tablename__ = 'subscriptions'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey('plans.id'), nullable=False)
+    external_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    price_paid_cents: Mapped[int] = mapped_column(Integer, nullable=True, default=0)
+    starts_at: Mapped[date] = mapped_column(nullable=False)
+    ends_at: Mapped[date] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default='active')  # active, cancelled, unpaid
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    tenant = relationship('Tenant', back_populates='subscriptions', lazy='joined')
+    plan = relationship('Plan', back_populates='subscriptions', lazy='joined')
+
+
+class TenantFeature(Base):
+    __tablename__ = 'tenant_features'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=False, index=True)
+    feature_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+
 # --- Phase 2 models: Departments, Designations, Employees ---
-from sqlalchemy import ForeignKey
 
 
 class Department(Base):
@@ -171,6 +279,64 @@ def seed_demo_org(db: Session) -> None:
 
     if created:
         db.commit()
+
+
+def seed_demo_plans(db: Session) -> None:
+    try:
+        existing_names = {name for (name,) in db.query(Plan.name).all()}
+    except Exception:
+        existing_names = set()
+
+    defaults = [
+        ('Trial', 0, 'trial', '14-day free trial subscription'),
+        ('Monthly', 99900, 'monthly', 'Monthly subscription for 30 days'),
+        ('3-Month', 279900, '3-month', '3 month subscription'),
+        ('6-Month', 529900, '6-month', '6 month subscription'),
+        ('9-Month', 749900, '9-month', '9 month subscription'),
+        ('Yearly', 999900, 'yearly', '12 month subscription'),
+    ]
+    created = False
+    for name, price, period, description in defaults:
+        if name in existing_names:
+            continue
+        db.add(Plan(name=name, price_cents=price, billing_period=period, description=description))
+        created = True
+
+    if created:
+        db.commit()
+
+
+def seed_demo_tenant_subscription(db: Session) -> None:
+    try:
+        demo_tenant = db.scalar(select(Tenant).where(Tenant.name == 'Demo Tenant'))
+    except Exception:
+        demo_tenant = None
+
+    if not demo_tenant:
+        return
+
+    try:
+        current_sub = db.query(Subscription).filter(Subscription.tenant_id == demo_tenant.id, Subscription.status == 'active').first()
+    except Exception:
+        current_sub = None
+
+    if current_sub:
+        return
+
+    plan = db.scalar(select(Plan).where(Plan.billing_period == 'monthly'))
+    if not plan:
+        return
+
+    today = date.today()
+    db.add(Subscription(
+        tenant_id=demo_tenant.id,
+        plan_id=plan.id,
+        starts_at=today,
+        ends_at=today + timedelta(days=30),
+        status='active',
+        price_paid_cents=plan.price_cents,
+    ))
+    db.commit()
 
 
 # --- Phase 4 models: Shifts, Attendance, Attendance Rules ---

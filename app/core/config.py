@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480
     database_url: str = 'sqlite:///./hrms.db'
     frontend_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,https://avi-corex-hrms-ui.vercel.app/,https://hrms.greatertechhub.com'
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
 
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 

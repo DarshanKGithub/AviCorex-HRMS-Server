@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import User
 from app.services.auth_service import get_user_from_token
+from app.db.models import Tenant, TenantFeature
+from sqlalchemy import select
 
 security = HTTPBearer(auto_error=False)
 
@@ -264,6 +266,43 @@ def require_permissions(*required_permissions: str) -> Callable[[User], User]:
         for permission in required_permissions:
             if permission not in user_permissions:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+        return user
+
+    return _checker
+
+
+def require_entitlement(feature_key: str) -> Callable[[User], User]:
+    """Dependency to ensure the current user's tenant has the given feature enabled.
+
+    Resolves tenant by email domain for now. Raises 403 if the feature is not enabled.
+    """
+
+    def _checker(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+        # Prefer explicit user.tenant_id binding; fallback to email domain
+        try:
+            t = None
+            if getattr(user, 'tenant_id', None):
+                t = db.scalar(select(Tenant).where(Tenant.id == user.tenant_id))
+            else:
+                parts = user.email.split('@')
+                if len(parts) != 2:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Tenant not found')
+                domain = parts[1].lower()
+                t = db.scalar(select(Tenant).where(Tenant.domain == domain))
+
+            if not t:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Tenant not found')
+
+            # Check tenant-specific feature flags
+            tf = db.scalar(select(TenantFeature).where(TenantFeature.tenant_id == t.id, TenantFeature.feature_key == feature_key, TenantFeature.enabled == True))
+            if not tf:
+                # Feature disabled for this tenant
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Feature not enabled for tenant')
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Entitlement check failed')
+
         return user
 
     return _checker

@@ -1,4 +1,6 @@
-from typing import Literal
+from __future__ import annotations
+
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +11,12 @@ class LoginRequest(BaseModel):
     role: str | None = None
 
 
+class TenantPublic(BaseModel):
+    id: str
+    name: str
+    domain: str | None = None
+
+
 class UserPublic(BaseModel):
     id: str
     full_name: str
@@ -16,6 +24,9 @@ class UserPublic(BaseModel):
     role: str
     employee_id: str | None = None
     avatar_url: str | None = None
+    tenant_id: str | None = None
+    tenant: Optional[TenantPublic] = None
+    entitlements: list[str] = []
 
 
 class LoginResponse(BaseModel):
@@ -53,3 +64,9 @@ class AvatarDeleteResponse(BaseModel):
 class PermissionsResponse(BaseModel):
     role: str
     permissions: list[str]
+
+
+class TenantPublic(BaseModel):
+    id: str
+    name: str
+    domain: str | None = None

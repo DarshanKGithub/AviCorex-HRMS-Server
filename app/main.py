@@ -22,7 +22,7 @@ from app.api.routes.documents import router as documents_router
 from app.api.routes.lifecycle import router as lifecycle_router
 from app.core.config import settings
 from app.db.database import engine, SessionLocal
-from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
+from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_plans, seed_demo_tenant_subscription, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
 import logging
 
 
@@ -59,7 +59,9 @@ app.include_router(workflow_router, prefix='/workflow', tags=['workflow'])
 app.include_router(documents_router, prefix='/documents', tags=['documents'])
 app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 from app.api.routes.admin import router as admin_router
+from app.api.routes.billing import router as billing_router
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
+app.include_router(billing_router, prefix='/billing', tags=['billing'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
@@ -101,6 +103,9 @@ def startup() -> None:
         run_seed_step(session, 'seed_demo_users', seed_demo_users)
         # seed Phase 2 default org data
         run_seed_step(session, 'seed_demo_org', seed_demo_org)
+        # seed subscription plans and demo tenant subscription
+        run_seed_step(session, 'seed_demo_plans', seed_demo_plans)
+        run_seed_step(session, 'seed_demo_tenant_subscription', seed_demo_tenant_subscription)
         # seed Phase 4 default shift and rule data
         run_seed_step(session, 'seed_demo_shifts', seed_demo_shifts)
         # seed Phase 5 leave types and holidays
