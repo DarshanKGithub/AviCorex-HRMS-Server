@@ -68,6 +68,7 @@ def request_leave_endpoint(
     return LeaveRequestPublic.model_validate({
         'id': lr.id,
         'employee_id': lr.employee_id,
+            'employee_name': getattr(lr.employee, 'full_name', None) if getattr(lr, 'employee', None) else None,
         'leave_type_id': lr.leave_type_id,
         'start_date': lr.start_date,
         'end_date': lr.end_date,
@@ -106,6 +107,48 @@ def list_requests_endpoint(
         items=[LeaveRequestPublic.model_validate({
             'id': r.id,
             'employee_id': r.employee_id,
+            'employee_name': getattr(r.employee, 'full_name', None) if getattr(r, 'employee', None) else None,
+            'leave_type_id': r.leave_type_id,
+            'start_date': r.start_date,
+            'end_date': r.end_date,
+            'session_from': r.session_from,
+            'session_to': r.session_to,
+            'days_requested': r.days_requested,
+            'reason': r.reason,
+            'contact_details': r.contact_details,
+            'cc_to': r.cc_to,
+            'attachment_paths': r.attachment_paths,
+            'status': r.status,
+            'approver_id': r.approver_id,
+            'approved_at': r.approved_at,
+            'created_at': r.created_at,
+            'updated_at': r.updated_at,
+        }) for r in items],
+        total=total,
+        page=page,
+        size=size,
+    )
+
+
+@router.get('/requests/team', response_model=PaginatedLeaveRequests)
+def list_team_requests_endpoint(
+    status: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PaginatedLeaveRequests:
+    """Fetch leave requests for employees managed by the current user."""
+    if user.role not in ['Admin', 'HR', 'Manager']:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
+
+    manager_id = user.id
+    items, total = list_leave_requests(db, manager_id=manager_id, status_filter=status, page=page, size=size)
+    return PaginatedLeaveRequests(
+        items=[LeaveRequestPublic.model_validate({
+            'id': r.id,
+            'employee_id': r.employee_id,
+            'employee_name': getattr(r.employee, 'full_name', None) if getattr(r, 'employee', None) else None,
             'leave_type_id': r.leave_type_id,
             'start_date': r.start_date,
             'end_date': r.end_date,
@@ -141,6 +184,7 @@ def get_request_endpoint(
     return LeaveRequestPublic.model_validate({
         'id': lr.id,
         'employee_id': lr.employee_id,
+            'employee_name': getattr(lr.employee, 'full_name', None) if getattr(lr, 'employee', None) else None,
         'leave_type_id': lr.leave_type_id,
         'start_date': lr.start_date,
         'end_date': lr.end_date,
@@ -182,6 +226,7 @@ def approve_request_endpoint(
     return LeaveRequestPublic.model_validate({
         'id': updated.id,
         'employee_id': updated.employee_id,
+            'employee_name': getattr(updated.employee, 'full_name', None) if getattr(updated, 'employee', None) else None,
         'leave_type_id': updated.leave_type_id,
         'start_date': updated.start_date,
         'end_date': updated.end_date,
@@ -257,16 +302,14 @@ def balances_with_details_endpoint(
     if not employee_id:
         employee_id = user.id
 
-    from app.db.models import LeaveType
     balances = get_leave_balances(employee_id, db)
     out = []
     for b in balances:
-        leave_type = db.query(LeaveType).filter(LeaveType.id == b.leave_type_id).first()
         out.append({
             'id': b.id,
             'employee_id': b.employee_id,
             'leave_type_id': b.leave_type_id,
-            'leave_type_name': leave_type.name if leave_type else 'Unknown',
+            'leave_type_name': b.leave_type.name if getattr(b, 'leave_type', None) else 'Unknown',
             'year': b.year,
             'granted_days': b.granted_days,
             'balance_days': b.balance_days,

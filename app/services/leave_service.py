@@ -106,10 +106,13 @@ def get_leave_request(leave_id: str, db: Session) -> LeaveRequest:
     return lr
 
 
-def list_leave_requests(db: Session, employee_id: str | None = None, status_filter: str | None = None, page: int = 1, size: int = 20):
+def list_leave_requests(db: Session, employee_id: str | None = None, manager_id: str | None = None, status_filter: str | None = None, page: int = 1, size: int = 20):
+    from app.db.models import Employee
     query = db.query(LeaveRequest)
     if employee_id:
         query = query.filter(LeaveRequest.employee_id == employee_id)
+    if manager_id:
+        query = query.join(Employee, LeaveRequest.employee_id == Employee.id).filter(Employee.manager_id == manager_id)
     if status_filter:
         query = query.filter(LeaveRequest.status == status_filter)
 

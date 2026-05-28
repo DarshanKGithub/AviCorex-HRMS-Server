@@ -21,6 +21,7 @@ from app.api.routes.workflow import router as workflow_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.lifecycle import router as lifecycle_router
 from app.core.config import settings
+from app.core.exceptions import setup_exception_handlers
 from app.db.database import engine, SessionLocal
 from app.db.models import Base, seed_demo_users, seed_demo_org, seed_demo_plans, seed_demo_tenant_subscription, seed_demo_shifts, seed_demo_leave_data, seed_demo_salary_data
 import logging
@@ -29,6 +30,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
+setup_exception_handlers(app)
 
 uploads_dir = Path(__file__).resolve().parents[1] / 'uploads'
 uploads_dir.mkdir(parents=True, exist_ok=True)

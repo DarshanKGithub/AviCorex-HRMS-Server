@@ -237,6 +237,10 @@ class Employee(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
+    department: Mapped['Department'] = relationship('Department', lazy='selectin')
+    designation: Mapped['Designation'] = relationship('Designation', lazy='selectin')
+    manager: Mapped['Employee'] = relationship('Employee', remote_side=[id], lazy='selectin')
+
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
@@ -560,6 +564,8 @@ class LeaveBalance(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
+    leave_type: Mapped['LeaveType'] = relationship('LeaveType', lazy='selectin')
+
 
 class LeaveRequest(Base):
     __tablename__ = 'leave_requests'
@@ -579,6 +585,9 @@ class LeaveRequest(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected, cancelled
     approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    leave_type: Mapped['LeaveType'] = relationship('LeaveType', lazy='selectin')
+    employee: Mapped['Employee'] = relationship('Employee', lazy='selectin', foreign_keys=[employee_id])
 
 
 # --- Simple To Do model for user tasks / personal checklist
