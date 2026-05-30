@@ -12,16 +12,18 @@ from app.schemas.employee import (
     EmployeeUpdate,
     PaginatedEmployees,
 )
+from app.schemas.auth import RoleUpdateRequest
 from app.services.employee_service import search_employees, create_employee, get_employee, update_employee, delete_employee
 from app.services.employee_service import get_manager_chain
+from app.services.audit_service import create_audit_log
 
 router = APIRouter()
 
 
 @router.get('/', response_model=PaginatedEmployees)
 def employees(page: int = 1, size: int = 20, q: str | None = None, department_id: str | None = None,
-              designation_id: str | None = None, db: Session = Depends(get_db)):
-    items, total = search_employees(db=db, page=page, size=size, q=q, department_id=department_id, designation_id=designation_id)
+              designation_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(require_permissions('view_employee'))):
+    items, total = search_employees(db=db, page=page, size=size, q=q, department_id=department_id, designation_id=designation_id, tenant_id=user.tenant_id)
     return PaginatedEmployees(
         items=[EmployeePublic(
             id=e.id,
@@ -48,7 +50,7 @@ def create(
     user: User = Depends(require_permissions('create_employee')),
     db: Session = Depends(get_db),
 ):
-    e = create_employee(payload=payload, db=db, actor_id=user.id)
+    e = create_employee(payload=payload, db=db, actor_id=user.id, tenant_id=user.tenant_id)
     linked_user = db.scalar(select(User).where(User.id == e.id))
     public = _to_employee_public(e)
     return EmployeePublicWithAccount(
@@ -59,8 +61,8 @@ def create(
 
 
 @router.get('/{employee_id}', response_model=EmployeePublic)
-def get_one(employee_id: str, db: Session = Depends(get_db)):
-    e = get_employee(employee_id, db=db)
+def get_one(employee_id: str, db: Session = Depends(get_db), user: User = Depends(require_permissions('view_employee'))):
+    e = get_employee(employee_id, db=db, tenant_id=user.tenant_id)
     return EmployeePublic(
         id=e.id,
         full_name=e.full_name,
@@ -80,7 +82,7 @@ def patch(
     db: Session = Depends(get_db),
 ):
 
-    e = update_employee(employee_id, payload=payload, db=db, actor_id=user.id)
+    e = update_employee(employee_id, payload=payload, db=db, actor_id=user.id, tenant_id=user.tenant_id)
     return EmployeePublic(
         id=e.id,
         full_name=e.full_name,
@@ -95,13 +97,63 @@ def patch(
 @router.delete('/{employee_id}')
 def remove(employee_id: str, user: User = Depends(require_permissions('delete_employee')), db: Session = Depends(get_db)):
 
-    delete_employee(employee_id, db=db, actor_id=user.id)
+    delete_employee(employee_id, db=db, actor_id=user.id, tenant_id=user.tenant_id)
     return {'detail': 'deleted'}
 
 
+@router.patch('/{employee_id}/role', response_model=EmployeePublicWithAccount)
+def update_role(
+    employee_id: str,
+    payload: RoleUpdateRequest,
+    user: User = Depends(require_permissions('manage_roles')),
+    db: Session = Depends(get_db),
+):
+    # Ensure employee is in same tenant
+    e = get_employee(employee_id, db=db, tenant_id=user.tenant_id)
+    
+    linked_user = db.scalar(select(User).where(User.id == e.id))
+    if not linked_user:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee does not have a user account")
+
+    allowed_roles = {'Worker', 'Employee', 'Manager', 'HR', 'Admin', 'CEO'}
+    new_role = payload.role.strip()
+    if new_role not in allowed_roles:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid role')
+
+    if user.id == linked_user.id:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Cannot change your own role')
+
+    old_role = linked_user.role
+    if old_role != new_role:
+        linked_user.role = new_role
+        create_audit_log(
+            db,
+            actor_id=user.id,
+            action='ROLE_UPDATED',
+            object_type='User',
+            object_id=linked_user.id,
+            data={
+                'old_role': old_role,
+                'new_role': new_role,
+            },
+        )
+        db.commit()
+        db.refresh(linked_user)
+
+    public = _to_employee_public(e)
+    return EmployeePublicWithAccount(
+        **public.model_dump(),
+        role=linked_user.role,
+        login_created=True,
+    )
+
+
 @router.get('/{employee_id}/manager-chain')
-def manager_chain(employee_id: str, db: Session = Depends(get_db)):
-    chain = get_manager_chain(employee_id=employee_id, db=db)
+def manager_chain(employee_id: str, db: Session = Depends(get_db), user: User = Depends(require_permissions('view_employee'))):
+    chain = get_manager_chain(employee_id=employee_id, db=db, tenant_id=user.tenant_id)
     return chain
 
 import os

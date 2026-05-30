@@ -62,9 +62,8 @@ def request_leave_endpoint(
 ) -> LeaveRequestPublic:
     # user.id is user.id; map to employee id: login returns employee_id in user payload when available
     employee_id = getattr(user, 'id', None)
-    # If user has employee mapping in DB, use that; otherwise assume user.id equals employee.id (demo)
     # create_leave_request will validate employee existence
-    lr = create_leave_request(employee_id, payload, db)
+    lr = create_leave_request(employee_id, payload, db, tenant_id=user.tenant_id)
     return LeaveRequestPublic.model_validate({
         'id': lr.id,
         'employee_id': lr.employee_id,
@@ -102,7 +101,7 @@ def list_requests_endpoint(
     if not employee_id and not has_permission(user.role, 'view_leave'):
         employee_id = user.id
 
-    items, total = list_leave_requests(db, employee_id=employee_id, status_filter=status, page=page, size=size)
+    items, total = list_leave_requests(db, tenant_id=user.tenant_id, employee_id=employee_id, status_filter=status, page=page, size=size)
     return PaginatedLeaveRequests(
         items=[LeaveRequestPublic.model_validate({
             'id': r.id,
@@ -143,7 +142,7 @@ def list_team_requests_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
 
     manager_id = user.id
-    items, total = list_leave_requests(db, manager_id=manager_id, status_filter=status, page=page, size=size)
+    items, total = list_leave_requests(db, tenant_id=user.tenant_id, manager_id=manager_id, status_filter=status, page=page, size=size)
     return PaginatedLeaveRequests(
         items=[LeaveRequestPublic.model_validate({
             'id': r.id,
@@ -177,7 +176,7 @@ def get_request_endpoint(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    lr = get_leave_request(request_id, db)
+    lr = get_leave_request(request_id, db, tenant_id=user.tenant_id)
     if lr.employee_id != user.id and not has_permission(user.role, 'view_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees requests')
 
@@ -214,7 +213,7 @@ def approve_request_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
 
     # For Manager role, ensure they are manager of the employee
-    lr = get_leave_request(request_id, db)
+    lr = get_leave_request(request_id, db, tenant_id=user.tenant_id)
     if user.role == 'Manager':
         # ensure manager relationship (employee.manager_id == user.id)
         from app.db.models import Employee
@@ -222,7 +221,7 @@ def approve_request_endpoint(
         if not emp or emp.manager_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not authorized to approve this request')
 
-    updated = approve_leave(request_id, user.id, payload.approve, db)
+    updated = approve_leave(request_id, user.id, payload.approve, db, tenant_id=user.tenant_id)
     return LeaveRequestPublic.model_validate({
         'id': updated.id,
         'employee_id': updated.employee_id,
@@ -257,7 +256,7 @@ def bulk_approve_requests_endpoint(
     if not payload.request_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='request_ids cannot be empty')
 
-    result = bulk_approve_leave(payload.request_ids, user.id, payload.approve, db)
+    result = bulk_approve_leave(payload.request_ids, user.id, payload.approve, db, tenant_id=user.tenant_id)
     return BulkApproveResult.model_validate(result)
 
 
@@ -325,7 +324,7 @@ def list_holidays_endpoint(
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    holidays = list_holidays(db, year=year)
+    holidays = list_holidays(db, year=year, tenant_id=_user.tenant_id)
     return [
         HolidayPublic.model_validate(
             {
@@ -349,7 +348,7 @@ def create_holiday_endpoint(
     if not has_permission(user.role, 'approve_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
 
-    holiday = create_holiday(payload.name, payload.holiday_date, payload.is_public, db)
+    holiday = create_holiday(payload.name, payload.holiday_date, payload.is_public, db, tenant_id=user.tenant_id)
     return HolidayPublic.model_validate(
         {
             'id': holiday.id,
@@ -370,7 +369,7 @@ def delete_holiday_endpoint(
     if not has_permission(user.role, 'approve_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
 
-    delete_holiday(holiday_id, db)
+    delete_holiday(holiday_id, db, tenant_id=user.tenant_id)
     return {'ok': True}
 
 
@@ -383,7 +382,7 @@ async def upload_leave_attachment(
 ):
     """Upload an attachment file for a leave request."""
     # Verify the leave request exists and belongs to the user or user is authorized to approve
-    lr = get_leave_request(request_id, db)
+    lr = get_leave_request(request_id, db, tenant_id=user.tenant_id)
     if lr.employee_id != user.id and not has_permission(user.role, 'approve_leave'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot upload files for other employees')
 

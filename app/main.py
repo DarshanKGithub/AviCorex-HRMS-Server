@@ -62,8 +62,11 @@ app.include_router(documents_router, prefix='/documents', tags=['documents'])
 app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 from app.api.routes.admin import router as admin_router
 from app.api.routes.billing import router as billing_router
+from app.api.routes.tenants import router as tenants_router
+
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
 app.include_router(billing_router, prefix='/billing', tags=['billing'])
+app.include_router(tenants_router, prefix='/tenants', tags=['tenants'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 

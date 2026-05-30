@@ -104,8 +104,34 @@ def update_user_role(
 # --- Tenancy admin endpoints ---
 @router.post('/tenants', response_model=TenantPublic)
 def create_tenant(payload: TenantCreate, actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
-    t = Tenant(name=payload.name.strip(), domain=(payload.domain or None))
+    from app.core.security import hash_password
+    import uuid
+    from app.db.models import Employee
+
+    t = Tenant(id=str(uuid.uuid4()), name=payload.name.strip(), domain=(payload.domain or None), is_active=True)
     db.add(t)
+    
+    user_id = str(uuid.uuid4())
+    new_user = User(
+        id=user_id,
+        tenant_id=t.id,
+        full_name=payload.admin_name.strip(),
+        email=payload.admin_email.lower().strip(),
+        password_hash=hash_password(payload.admin_password),
+        role='CEO',
+        is_active=True
+    )
+    db.add(new_user)
+
+    new_employee = Employee(
+        id=user_id,
+        tenant_id=t.id,
+        full_name=payload.admin_name.strip(),
+        email=payload.admin_email.lower().strip(),
+        is_active=True
+    )
+    db.add(new_employee)
+
     db.commit()
     db.refresh(t)
     return TenantPublic(id=t.id, name=t.name, domain=t.domain, is_active=t.is_active)

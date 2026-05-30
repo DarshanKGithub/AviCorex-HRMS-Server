@@ -11,15 +11,20 @@ from app.db.models import Employee, User, LeaveType, LeaveBalance
 from app.schemas.employee import EmployeeCreate, EmployeeCreateWithAccount, EmployeeUpdate, ALLOWED_PROVISION_ROLES
 
 
-def list_employees(db: Session) -> List[Employee]:
-    return db.scalars(select(Employee).order_by(Employee.full_name)).all()
+def list_employees(db: Session, tenant_id: str | None = None) -> List[Employee]:
+    stmt = select(Employee).order_by(Employee.full_name)
+    if tenant_id:
+        stmt = stmt.where(Employee.tenant_id == tenant_id)
+    return db.scalars(stmt).all()
 
 
 def search_employees(db: Session, page: int = 1, size: int = 20, q: str | None = None,
-                     department_id: str | None = None, designation_id: str | None = None) -> Tuple[List[Employee], int]:
+                     department_id: str | None = None, designation_id: str | None = None, tenant_id: str | None = None) -> Tuple[List[Employee], int]:
     """Return (items, total) for employees matching optional filters with pagination."""
     stmt = select(Employee)
     filters = []
+    if tenant_id:
+        filters.append(Employee.tenant_id == tenant_id)
     if q:
         like = f"%{q.lower()}%"
         filters.append(func.lower(Employee.full_name).like(like) | func.lower(Employee.email).like(like))
@@ -38,8 +43,11 @@ def search_employees(db: Session, page: int = 1, size: int = 20, q: str | None =
     return items, int(total or 0)
 
 
-def get_employee(employee_id: str, db: Session) -> Employee:
-    emp = db.scalar(select(Employee).where(Employee.id == employee_id))
+def get_employee(employee_id: str, db: Session, tenant_id: str | None = None) -> Employee:
+    stmt = select(Employee).where(Employee.id == employee_id)
+    if tenant_id:
+        stmt = stmt.where(Employee.tenant_id == tenant_id)
+    emp = db.scalar(stmt)
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
     return emp
@@ -63,9 +71,10 @@ def _validate_manager_for_new_employee(db: Session, manager_id: str | None, new_
         current = db.scalar(select(Employee.manager_id).where(Employee.id == current))
 
 
-def _employee_from_payload(payload: EmployeeCreate, employee_id: str) -> Employee:
+def _employee_from_payload(payload: EmployeeCreate, employee_id: str, tenant_id: str | None = None) -> Employee:
     return Employee(
         id=employee_id,
+        tenant_id=tenant_id,
         full_name=payload.full_name.strip(),
         email=payload.email.lower().strip(),
         phone=payload.phone,
@@ -138,7 +147,7 @@ def _audit_employee_action(db: Session, actor_id: str | None, action: str, emp: 
         db.rollback()
 
 
-def create_employee(payload: EmployeeCreate, db: Session, actor_id: str | None = None) -> Employee:
+def create_employee(payload: EmployeeCreate, db: Session, actor_id: str | None = None, tenant_id: str | None = None) -> Employee:
     """Create employee with linked login (preferred for Admin/HR provisioning)."""
     if isinstance(payload, EmployeeCreateWithAccount):
         return create_employee_with_account(payload, db, actor_id)
@@ -150,7 +159,7 @@ def create_employee(payload: EmployeeCreate, db: Session, actor_id: str | None =
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee with this email exists')
     new_id = str(uuid4())
     _validate_manager_for_new_employee(db, payload.manager_id, new_id)
-    emp = _employee_from_payload(payload, new_id)
+    emp = _employee_from_payload(payload, new_id, tenant_id)
     db.add(emp)
     db.commit()
     db.refresh(emp)
@@ -164,6 +173,7 @@ def create_employee_with_account(
     payload: EmployeeCreateWithAccount,
     db: Session,
     actor_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> Employee:
     email = payload.email.lower().strip()
     role = (payload.role or 'Employee').strip()
@@ -184,13 +194,14 @@ def create_employee_with_account(
 
     user = User(
         id=new_id,
+        tenant_id=tenant_id,
         full_name=payload.full_name.strip(),
         email=email,
         role=role,
         password_hash=hash_password(payload.password),
         is_active=True,
     )
-    emp = _employee_from_payload(payload, new_id)
+    emp = _employee_from_payload(payload, new_id, tenant_id)
 
     try:
         db.add(user)
@@ -207,8 +218,8 @@ def create_employee_with_account(
     return emp
 
 
-def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, actor_id: str | None = None) -> Employee:
-    emp = get_employee(employee_id, db)
+def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, actor_id: str | None = None, tenant_id: str | None = None) -> Employee:
+    emp = get_employee(employee_id, db, tenant_id)
     linked_user = db.scalar(select(User).where((User.id == emp.id) | (User.email == emp.email)))
     if payload.full_name is not None:
         emp.full_name = payload.full_name
@@ -261,8 +272,8 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, db: Session, acto
     return emp
 
 
-def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) -> Employee:
-    emp = get_employee(employee_id, db)
+def delete_employee(employee_id: str, db: Session, actor_id: str | None = None, tenant_id: str | None = None) -> Employee:
+    emp = get_employee(employee_id, db, tenant_id)
     try:
         from app.db.models import (
             AuditLog, EmployeeShiftAssignment, Attendance, LeaveBalance, LeaveRequest,
@@ -340,10 +351,13 @@ def delete_employee(employee_id: str, db: Session, actor_id: str | None = None) 
     return emp
 
 
-def get_manager_chain(employee_id: str, db: Session) -> List[dict]:
+def get_manager_chain(employee_id: str, db: Session, tenant_id: str | None = None) -> List[dict]:
     """Return manager chain for the given employee id as list of dicts (closest manager first)."""
     # get immediate manager
-    emp = db.scalar(select(Employee).where(Employee.id == employee_id))
+    stmt = select(Employee).where(Employee.id == employee_id)
+    if tenant_id:
+        stmt = stmt.where(Employee.tenant_id == tenant_id)
+    emp = db.scalar(stmt)
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
 

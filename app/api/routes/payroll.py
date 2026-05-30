@@ -50,7 +50,7 @@ def get_salary_endpoint(
     if employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees salary')
     
-    sal = get_or_create_salary(employee_id, db)
+    sal = get_or_create_salary(employee_id, db, tenant_id=user.tenant_id)
     return SalaryPublic.model_validate({
         'id': sal.id,
         'employee_id': sal.employee_id,
@@ -77,7 +77,8 @@ def create_payslip_endpoint(
         employee_id=payload.employee_id,
         month=payload.month,
         year=payload.year,
-        db=db
+        db=db,
+        tenant_id=_user.tenant_id
     )
     
     return PayslipPublic.model_validate({
@@ -117,7 +118,7 @@ def list_payslips_endpoint(
     if not employee_id and not has_permission(user.role, 'view_payroll'):
         employee_id = user.id
     
-    items, total = list_payslips(db, employee_id=employee_id, month=month, year=year, page=page, size=size)
+    items, total = list_payslips(db, tenant_id=user.tenant_id, employee_id=employee_id, month=month, year=year, page=page, size=size)
     
     return PaginatedPayslips(
         items=[PayslipPublic.model_validate({
@@ -151,7 +152,7 @@ def get_payslip_endpoint(
     db: Session = Depends(get_db),
 ):
     """Get detailed payslip with components breakdown."""
-    ps = get_payslip(payslip_id, db)
+    ps = get_payslip(payslip_id, db, tenant_id=user.tenant_id)
     
     # Employees can only view their own payslips
     if ps.employee_id != user.id and not has_permission(user.role, 'view_payroll'):
@@ -199,7 +200,7 @@ def approve_payslip_endpoint(
     if not has_permission(user.role, 'approve_leave') and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient privileges')
     
-    ps = approve_payslip(payslip_id, user.id, db)
+    ps = approve_payslip(payslip_id, user.id, db, tenant_id=user.tenant_id)
     
     return PayslipPublic.model_validate({
         'id': ps.id,
@@ -228,7 +229,7 @@ def mark_paid_endpoint(
     db: Session = Depends(get_db),
 ):
     """Mark payslip as paid (HR/Admin only)."""
-    ps = mark_payslip_paid(payslip_id, user.id, db)
+    ps = mark_payslip_paid(payslip_id, user.id, db, tenant_id=user.tenant_id)
     
     return PayslipPublic.model_validate({
         'id': ps.id,
@@ -257,14 +258,14 @@ def download_payslip_pdf(
     db: Session = Depends(get_db),
 ):
     """Download payslip as PDF."""
-    ps = get_payslip(payslip_id, db)
+    ps = get_payslip(payslip_id, db, tenant_id=user.tenant_id)
     
     # Permission check: Employee can only download their own, others need Admin/HR role
     if ps.employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not authorized to download this payslip')
     
     # Get payslip details
-    payslip_data = get_payslip_details(payslip_id, db)
+    payslip_data = get_payslip_details(payslip_id, db, tenant_id=user.tenant_id)
     
     # Generate PDF
     from app.core.payroll_utils import generate_payslip_pdf_bytes
@@ -292,7 +293,7 @@ def send_payslip_email_endpoint(
 ) -> dict:
     """Send payslip via email to employee."""
     try:
-        success = send_payslip_email(payslip_id, db)
+        success = send_payslip_email(payslip_id, db, tenant_id=_user.tenant_id)
         if success:
             return {'success': True, 'message': 'Payslip sent successfully'}
         else:
@@ -317,7 +318,7 @@ def run_batch_payroll_endpoint(
     if payload.year < 2000:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid year')
     
-    result = run_batch_payroll(payload.month, payload.year, db)
+    result = run_batch_payroll(payload.month, payload.year, db, tenant_id=_user.tenant_id)
     
     return BatchPayrollResult(**result)
 
@@ -339,7 +340,7 @@ def get_salary_history_endpoint(
     if employee_id != user.id and not has_permission(user.role, 'view_payroll'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not authorized to view this salary history')
     
-    result = get_salary_history(employee_id, db, page=page, size=size)
+    result = get_salary_history(employee_id, db, page=page, size=size, tenant_id=user.tenant_id)
     
     return SalaryHistoryResponse(**result)
 
@@ -360,7 +361,8 @@ def update_salary_endpoint(
         effective_from=payload.effective_from,
         reason=payload.reason,
         modified_by_id=user.id,
-        db=db
+        db=db,
+        tenant_id=user.tenant_id
     )
     
     return SalaryPublic.model_validate({

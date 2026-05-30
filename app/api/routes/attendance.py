@@ -161,7 +161,7 @@ def check_in_endpoint(
     if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot check in for other employees')
 
-    attendance = check_in(payload, db)
+    attendance = check_in(payload, db, tenant_id=user.tenant_id)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 
@@ -176,7 +176,7 @@ def check_out_endpoint(
     if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot check out for other employees')
 
-    attendance = check_out(payload, db)
+    attendance = check_out(payload, db, tenant_id=user.tenant_id)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 
@@ -198,7 +198,7 @@ def list_attendance_endpoint(
     if not employee_id and not has_permission(user.role, 'view_attendance'):
         employee_id = user.id
 
-    records, total = list_attendance(db, employee_id=employee_id, start_date=start_date, end_date=end_date, page=page, size=size)
+    records, total = list_attendance(db, tenant_id=user.tenant_id, employee_id=employee_id, start_date=start_date, end_date=end_date, page=page, size=size)
     return PaginatedAttendance(
         items=[AttendancePublic.model_validate(_attendance_to_dict(r)) for r in records],
         total=total,
@@ -222,7 +222,7 @@ def get_attendance_summary_endpoint(
     if start_date > end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='start_date must be before end_date')
 
-    return get_employee_attendance_summary(employee_id, start_date, end_date, db)
+    return get_employee_attendance_summary(employee_id, start_date, end_date, db, tenant_id=user.tenant_id)
 
 
 @router.get('/{attendance_id}', response_model=AttendancePublic)
@@ -232,7 +232,7 @@ def get_attendance_endpoint(
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Retrieve an attendance record by ID."""
-    attendance = get_attendance(attendance_id, db)
+    attendance = get_attendance(attendance_id, db, tenant_id=user.tenant_id)
     if attendance.employee_id != user.id and not has_permission(user.role, 'view_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees attendance')
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
@@ -245,7 +245,7 @@ def delete_attendance_endpoint(
     db: Session = Depends(get_db),
 ) -> AttendancePublic:
     """Delete an attendance record (Admin/HR only)."""
-    attendance = delete_attendance(attendance_id, db)
+    attendance = delete_attendance(attendance_id, db, tenant_id=_user.tenant_id)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 
@@ -267,7 +267,7 @@ def export_attendance_endpoint(
     start_date = date(year, month, 1)
     end_date = date(year, month, monthrange(year, month)[1])
 
-    summary = get_employee_attendance_summary(employee_id, start_date, end_date, db)
+    summary = get_employee_attendance_summary(employee_id, start_date, end_date, db, tenant_id=user.tenant_id)
 
     filename = f"Attendance_{summary.employee_id}_{start_date.strftime('%B%Y')}"
 

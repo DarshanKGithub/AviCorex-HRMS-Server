@@ -13,6 +13,8 @@ from app.schemas.auth import (
     ProfileUpdateRequest,
     UserPublic,
     PermissionsResponse,
+    RegisterRequest,
+    RegisterResponse,
 )
 from app.services.auth_service import (
     authenticate_user,
@@ -34,6 +36,13 @@ security = HTTPBearer(auto_error=False)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     user = authenticate_user(email=payload.email, password=payload.password, role=payload.role, db=db)
     return create_login_response(user, db=db)
+
+
+@router.post('/register', response_model=RegisterResponse)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> RegisterResponse:
+    from app.services.auth_service import register_tenant
+    user = register_tenant(payload, db=db)
+    return RegisterResponse(message='Registration successful', user=to_public_user(user, db=db))
 
 
 @router.get('/me', response_model=UserPublic)

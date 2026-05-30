@@ -70,3 +70,13 @@ class TenantPublic(BaseModel):
     id: str
     name: str
     domain: str | None = None
+
+class RegisterRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    admin_name: str = Field(min_length=1)
+    admin_email: str = Field(min_length=3)
+    password: str = Field(min_length=6)
+
+class RegisterResponse(BaseModel):
+    message: str
+    user: UserPublic

@@ -11,18 +11,21 @@ from app.db.models import (
 )
 
 
-def calculate_days_worked_from_attendance(employee_id: str, month: int, year: int, db: Session) -> tuple[int, int]:
+def calculate_days_worked_from_attendance(employee_id: str, month: int, year: int, db: Session, tenant_id: str | None = None) -> tuple[int, int]:
     """Calculate days worked and days absent from attendance records for a given month/year.
     Returns (days_worked, days_absent)."""
     # Get all days in the month
     _, days_in_month = monthrange(year, month)
     
     # Query attendance records for the employee in the month
-    attendances = db.query(Attendance).filter(
+    query = db.query(Attendance).filter(
         Attendance.employee_id == employee_id,
         func.extract('year', Attendance.attendance_date) == year,
         func.extract('month', Attendance.attendance_date) == month,
-    ).all()
+    )
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    attendances = query.all()
     
     # Count working days (assuming working days are Mon-Fri, excluding holidays)
     working_days = 0
@@ -53,30 +56,36 @@ def calculate_days_worked_from_attendance(employee_id: str, month: int, year: in
     return int(days_worked), days_absent
 
 
-def get_or_create_salary(employee_id: str, db: Session) -> Salary:
+def get_or_create_salary(employee_id: str, db: Session, tenant_id: str | None = None) -> Salary:
     """Get employee's current active salary record."""
-    sal = db.query(Salary).filter(
+    query = db.query(Salary).filter(
         Salary.employee_id == employee_id,
         Salary.is_active.is_(True)
-    ).first()
+    )
+    if tenant_id:
+        query = query.join(Employee, Salary.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    sal = query.first()
     if not sal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No active salary found for employee')
     return sal
 
 
-def calculate_gross_salary(employee_id: str, db: Session) -> tuple[float, list]:
+def calculate_gross_salary(employee_id: str, db: Session, tenant_id: str | None = None) -> tuple[float, list]:
     """Calculate gross salary (base + all earnings) for an employee.
     Returns (gross_amount, list of earning components)."""
-    salary = get_or_create_salary(employee_id, db)
+    salary = get_or_create_salary(employee_id, db, tenant_id)
     base = float(salary.base_salary)
     
     # Get all earnings components for employee
-    earnings = db.query(EmployeeSalaryComponent).join(
+    query = db.query(EmployeeSalaryComponent).join(
         SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
     ).filter(
         EmployeeSalaryComponent.employee_id == employee_id,
         SalaryComponent.component_type == 'earning'
-    ).all()
+    )
+    if tenant_id:
+        query = query.join(Employee, EmployeeSalaryComponent.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    earnings = query.all()
     
     earning_components = [{'name': 'Basic Salary', 'amount': base}]
     total_earnings = base
@@ -90,17 +99,20 @@ def calculate_gross_salary(employee_id: str, db: Session) -> tuple[float, list]:
     return total_earnings, earning_components
 
 
-def calculate_deductions_and_tax(employee_id: str, gross_salary: float, db: Session) -> tuple[float, float, list, list]:
+def calculate_deductions_and_tax(employee_id: str, gross_salary: float, db: Session, tenant_id: str | None = None) -> tuple[float, float, list, list]:
     """Calculate total deductions and tax.
     Returns (total_deductions, total_tax, deduction_components, tax_components)."""
     
     # Get deduction components
-    deductions = db.query(EmployeeSalaryComponent).join(
+    d_query = db.query(EmployeeSalaryComponent).join(
         SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
     ).filter(
         EmployeeSalaryComponent.employee_id == employee_id,
         SalaryComponent.component_type == 'deduction'
-    ).all()
+    )
+    if tenant_id:
+        d_query = d_query.join(Employee, EmployeeSalaryComponent.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    deductions = d_query.all()
     
     deduction_components = []
     total_deductions = 0.0
@@ -111,12 +123,15 @@ def calculate_deductions_and_tax(employee_id: str, gross_salary: float, db: Sess
             total_deductions += float(dcomp.amount)
     
     # Get tax components
-    taxes = db.query(EmployeeSalaryComponent).join(
+    t_query = db.query(EmployeeSalaryComponent).join(
         SalaryComponent, EmployeeSalaryComponent.salary_component_id == SalaryComponent.id
     ).filter(
         EmployeeSalaryComponent.employee_id == employee_id,
         SalaryComponent.component_type == 'tax'
-    ).all()
+    )
+    if tenant_id:
+        t_query = t_query.join(Employee, EmployeeSalaryComponent.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    taxes = t_query.all()
     
     tax_components = []
     total_tax = 0.0
@@ -130,12 +145,15 @@ def calculate_deductions_and_tax(employee_id: str, gross_salary: float, db: Sess
 
 
 def create_payslip(employee_id: str, month: int, year: int, days_worked: int | None = None, 
-                   days_absent: int | None = None, db: Session = None) -> Payslip:
+                   days_absent: int | None = None, db: Session = None, tenant_id: str | None = None) -> Payslip:
     """Generate payslip for an employee for a given month/year.
     If days_worked/days_absent not provided, auto-calculate from attendance records."""
     
     # Validate employee exists
-    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    query = db.query(Employee).filter(Employee.id == employee_id)
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    emp = query.first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
     
@@ -150,17 +168,17 @@ def create_payslip(employee_id: str, month: int, year: int, days_worked: int | N
     
     # Auto-calculate days worked from attendance if not provided
     if days_worked is None or days_absent is None:
-        calculated_worked, calculated_absent = calculate_days_worked_from_attendance(employee_id, month, year, db)
+        calculated_worked, calculated_absent = calculate_days_worked_from_attendance(employee_id, month, year, db, tenant_id)
         if days_worked is None:
             days_worked = calculated_worked
         if days_absent is None:
             days_absent = calculated_absent
     
-    salary = get_or_create_salary(employee_id, db)
+    salary = get_or_create_salary(employee_id, db, tenant_id)
     
     # Calculate components
-    gross_salary, earning_components = calculate_gross_salary(employee_id, db)
-    total_deductions, total_tax, deduction_comps, tax_comps = calculate_deductions_and_tax(employee_id, gross_salary, db)
+    gross_salary, earning_components = calculate_gross_salary(employee_id, db, tenant_id)
+    total_deductions, total_tax, deduction_comps, tax_comps = calculate_deductions_and_tax(employee_id, gross_salary, db, tenant_id)
     
     # Calculate net salary
     net_salary = gross_salary - total_deductions - total_tax
@@ -232,18 +250,24 @@ def create_payslip(employee_id: str, month: int, year: int, days_worked: int | N
     return ps
 
 
-def get_payslip(payslip_id: str, db: Session) -> Payslip:
+def get_payslip(payslip_id: str, db: Session, tenant_id: str | None = None) -> Payslip:
     """Fetch a payslip by ID."""
-    ps = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    query = db.query(Payslip)
+    if tenant_id:
+        query = query.join(Employee, Payslip.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    ps = query.filter(Payslip.id == payslip_id).first()
     if not ps:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Payslip not found')
     return ps
 
 
-def list_payslips(db: Session, employee_id: str | None = None, month: int | None = None, 
+def list_payslips(db: Session, tenant_id: str | None = None, employee_id: str | None = None, month: int | None = None, 
                   year: int | None = None, page: int = 1, size: int = 20):
     """List payslips with optional filters."""
     query = db.query(Payslip)
+    
+    if tenant_id:
+        query = query.join(Employee, Payslip.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
     
     if employee_id:
         query = query.filter(Payslip.employee_id == employee_id)
@@ -258,9 +282,9 @@ def list_payslips(db: Session, employee_id: str | None = None, month: int | None
     return items, int(total)
 
 
-def approve_payslip(payslip_id: str, approver_id: str, db: Session) -> Payslip:
+def approve_payslip(payslip_id: str, approver_id: str, db: Session, tenant_id: str | None = None) -> Payslip:
     """Approve a payslip (transition from draft to approved)."""
-    ps = get_payslip(payslip_id, db)
+    ps = get_payslip(payslip_id, db, tenant_id)
     
     if ps.status != 'draft':
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payslip is not in draft status')
@@ -290,9 +314,9 @@ def approve_payslip(payslip_id: str, approver_id: str, db: Session) -> Payslip:
     return ps
 
 
-def mark_payslip_paid(payslip_id: str, processor_id: str, db: Session) -> Payslip:
+def mark_payslip_paid(payslip_id: str, processor_id: str, db: Session, tenant_id: str | None = None) -> Payslip:
     """Mark payslip as paid (transition from approved to paid)."""
-    ps = get_payslip(payslip_id, db)
+    ps = get_payslip(payslip_id, db, tenant_id)
     
     if ps.status != 'approved':
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Payslip must be approved before marking as paid')
@@ -320,9 +344,9 @@ def mark_payslip_paid(payslip_id: str, processor_id: str, db: Session) -> Paysli
     return ps
 
 
-def get_payslip_details(payslip_id: str, db: Session) -> dict:
+def get_payslip_details(payslip_id: str, db: Session, tenant_id: str | None = None) -> dict:
     """Get full payslip details including components for PDF/email."""
-    ps = get_payslip(payslip_id, db)
+    ps = get_payslip(payslip_id, db, tenant_id)
     
     # Get employee info
     emp = db.query(Employee).filter(Employee.id == ps.employee_id).first()
@@ -359,11 +383,11 @@ def get_payslip_details(payslip_id: str, db: Session) -> dict:
     }
 
 
-def send_payslip_email(payslip_id: str, db: Session) -> bool:
+def send_payslip_email(payslip_id: str, db: Session, tenant_id: str | None = None) -> bool:
     """Generate and send payslip PDF via email."""
     from app.core.payroll_utils import send_email, generate_payslip_pdf_bytes, generate_payslip_html
     
-    payslip_data = get_payslip_details(payslip_id, db)
+    payslip_data = get_payslip_details(payslip_id, db, tenant_id)
     
     if not payslip_data['employee_email']:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Employee email not found')
@@ -407,12 +431,15 @@ def send_payslip_email(payslip_id: str, db: Session) -> bool:
     return success
 
 
-def run_batch_payroll(month: int, year: int, db: Session) -> dict:
+def run_batch_payroll(month: int, year: int, db: Session, tenant_id: str | None = None) -> dict:
     """Generate payslips for all active employees for a given month/year.
     Returns summary of processing results."""
     
     # Get all active employees
-    employees = db.query(Employee).filter(Employee.is_active.is_(True)).all()
+    query = db.query(Employee).filter(Employee.is_active.is_(True))
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    employees = query.all()
     
     if not employees:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='No active employees found')
@@ -443,7 +470,8 @@ def run_batch_payroll(month: int, year: int, db: Session) -> dict:
                 employee_id=emp.id,
                 month=month,
                 year=year,
-                db=db
+                db=db,
+                tenant_id=tenant_id
             )
             results['successful'] += 1
             
@@ -497,9 +525,12 @@ def create_salary_history_entry(employee_id: str, base_salary: float, grade: str
     return history
 
 
-def get_salary_history(employee_id: str, db: Session, page: int = 1, size: int = 10) -> dict:
+def get_salary_history(employee_id: str, db: Session, page: int = 1, size: int = 10, tenant_id: str | None = None) -> dict:
     """Get salary history for an employee with pagination."""
-    query = db.query(SalaryHistory).filter(SalaryHistory.employee_id == employee_id).order_by(SalaryHistory.effective_from.desc())
+    query = db.query(SalaryHistory).filter(SalaryHistory.employee_id == employee_id)
+    if tenant_id:
+        query = query.join(Employee, SalaryHistory.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    query = query.order_by(SalaryHistory.effective_from.desc())
     
     total = query.count()
     skip = (page - 1) * size
@@ -527,12 +558,15 @@ def get_salary_history(employee_id: str, db: Session, page: int = 1, size: int =
 
 
 def update_salary(employee_id: str, new_base_salary: float, grade: str | None, 
-                  effective_from: date, reason: str | None, modified_by_id: str, db: Session) -> Salary:
+                  effective_from: date, reason: str | None, modified_by_id: str, db: Session, tenant_id: str | None = None) -> Salary:
     """Update employee salary and create history entry.
     Marks old salary as inactive and creates new one."""
     
     # Validate employee exists
-    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    query = db.query(Employee).filter(Employee.id == employee_id)
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    emp = query.first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
     

@@ -51,14 +51,20 @@ def _days_between(start_date, end_date) -> int:
     return (end_date - start_date).days + 1
 
 
-def create_leave_request(employee_id: str, payload, db: Session) -> LeaveRequest:
+def create_leave_request(employee_id: str, payload, db: Session, tenant_id: str | None = None) -> LeaveRequest:
     # payload: LeaveRequestCreate-like
     # Validate employee
-    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    emp_query = db.query(Employee).filter(Employee.id == employee_id)
+    if tenant_id:
+        emp_query = emp_query.filter(Employee.tenant_id == tenant_id)
+    emp = emp_query.first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
 
-    lt = db.query(LeaveType).filter(LeaveType.id == payload.leave_type_id, LeaveType.is_active.is_(True)).first()
+    lt_query = db.query(LeaveType).filter(LeaveType.id == payload.leave_type_id, LeaveType.is_active.is_(True))
+    if tenant_id:
+        lt_query = lt_query.filter(LeaveType.tenant_id == tenant_id)
+    lt = lt_query.first()
     if not lt:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Leave type not found')
 
@@ -99,20 +105,30 @@ def create_leave_request(employee_id: str, payload, db: Session) -> LeaveRequest
     return lr
 
 
-def get_leave_request(leave_id: str, db: Session) -> LeaveRequest:
-    lr = db.query(LeaveRequest).filter(LeaveRequest.id == leave_id).first()
+def get_leave_request(leave_id: str, db: Session, tenant_id: str | None = None) -> LeaveRequest:
+    query = db.query(LeaveRequest)
+    if tenant_id:
+        query = query.join(Employee, LeaveRequest.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    lr = query.filter(LeaveRequest.id == leave_id).first()
     if not lr:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Leave request not found')
     return lr
 
 
-def list_leave_requests(db: Session, employee_id: str | None = None, manager_id: str | None = None, status_filter: str | None = None, page: int = 1, size: int = 20):
+def list_leave_requests(db: Session, tenant_id: str | None = None, employee_id: str | None = None, manager_id: str | None = None, status_filter: str | None = None, page: int = 1, size: int = 20):
     from app.db.models import Employee
     query = db.query(LeaveRequest)
+    
+    if tenant_id or manager_id:
+        query = query.join(Employee, LeaveRequest.employee_id == Employee.id)
+        
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+        
     if employee_id:
         query = query.filter(LeaveRequest.employee_id == employee_id)
     if manager_id:
-        query = query.join(Employee, LeaveRequest.employee_id == Employee.id).filter(Employee.manager_id == manager_id)
+        query = query.filter(Employee.manager_id == manager_id)
     if status_filter:
         query = query.filter(LeaveRequest.status == status_filter)
 
@@ -135,8 +151,8 @@ def _get_or_create_balance(employee_id: str, leave_type_id: str, year: int, db: 
     return bal
 
 
-def approve_leave(leave_id: str, approver_id: str, approve: bool, db: Session) -> LeaveRequest:
-    lr = get_leave_request(leave_id, db)
+def approve_leave(leave_id: str, approver_id: str, approve: bool, db: Session, tenant_id: str | None = None) -> LeaveRequest:
+    lr = get_leave_request(leave_id, db, tenant_id)
     if lr.status not in ['pending']:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Leave request is not pending')
 
@@ -173,11 +189,14 @@ def approve_leave(leave_id: str, approver_id: str, approve: bool, db: Session) -
     return lr
 
 
-def get_leave_balances(employee_id: str, db: Session) -> list[LeaveBalance]:
-    return db.query(LeaveBalance).filter(LeaveBalance.employee_id == employee_id).all()
+def get_leave_balances(employee_id: str, db: Session, tenant_id: str | None = None) -> list[LeaveBalance]:
+    query = db.query(LeaveBalance).filter(LeaveBalance.employee_id == employee_id)
+    if tenant_id:
+        query = query.join(Employee, LeaveBalance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    return query.all()
 
 
-def bulk_approve_leave(request_ids: list[str], approver_id: str, approve: bool, db: Session) -> dict:
+def bulk_approve_leave(request_ids: list[str], approver_id: str, approve: bool, db: Session, tenant_id: str | None = None) -> dict:
     processed = 0
     approved = 0
     rejected = 0
@@ -186,7 +205,7 @@ def bulk_approve_leave(request_ids: list[str], approver_id: str, approve: bool, 
 
     for request_id in request_ids:
         try:
-            approve_leave(request_id, approver_id, approve, db)
+            approve_leave(request_id, approver_id, approve, db, tenant_id)
             processed += 1
             if approve:
                 approved += 1
@@ -205,8 +224,10 @@ def bulk_approve_leave(request_ids: list[str], approver_id: str, approve: bool, 
     }
 
 
-def list_holidays(db: Session, year: int | None = None) -> list[Holiday]:
+def list_holidays(db: Session, year: int | None = None, tenant_id: str | None = None) -> list[Holiday]:
     query = db.query(Holiday)
+    if tenant_id:
+        query = query.filter(Holiday.tenant_id == tenant_id)
     if year is not None:
         start = datetime(year, 1, 1).date()
         end = datetime(year, 12, 31).date()
@@ -214,20 +235,26 @@ def list_holidays(db: Session, year: int | None = None) -> list[Holiday]:
     return query.order_by(Holiday.holiday_date.asc()).all()
 
 
-def create_holiday(name: str, holiday_date, is_public: bool, db: Session) -> Holiday:
-    existing = db.query(Holiday).filter(Holiday.holiday_date == holiday_date, Holiday.name == name).first()
+def create_holiday(name: str, holiday_date, is_public: bool, db: Session, tenant_id: str | None = None) -> Holiday:
+    query = db.query(Holiday).filter(Holiday.holiday_date == holiday_date, Holiday.name == name)
+    if tenant_id:
+        query = query.filter(Holiday.tenant_id == tenant_id)
+    existing = query.first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Holiday already exists')
 
-    holiday = Holiday(name=name, holiday_date=holiday_date, is_public=is_public)
+    holiday = Holiday(name=name, holiday_date=holiday_date, is_public=is_public, tenant_id=tenant_id)
     db.add(holiday)
     db.commit()
     db.refresh(holiday)
     return holiday
 
 
-def delete_holiday(holiday_id: str, db: Session) -> None:
-    holiday = db.query(Holiday).filter(Holiday.id == holiday_id).first()
+def delete_holiday(holiday_id: str, db: Session, tenant_id: str | None = None) -> None:
+    query = db.query(Holiday).filter(Holiday.id == holiday_id)
+    if tenant_id:
+        query = query.filter(Holiday.tenant_id == tenant_id)
+    holiday = query.first()
     if not holiday:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Holiday not found')
     db.delete(holiday)

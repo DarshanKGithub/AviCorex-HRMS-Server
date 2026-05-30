@@ -195,7 +195,8 @@ class Department(Base):
     __tablename__ = 'departments'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -203,7 +204,8 @@ class Designation(Base):
     __tablename__ = 'designations'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -211,8 +213,9 @@ class Employee(Base):
     __tablename__ = 'employees'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
     full_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=True)
     date_of_birth: Mapped[date] = mapped_column(Date, nullable=True)
     gender: Mapped[str] = mapped_column(String(20), nullable=True)  # Male, Female, Other, Prefer not to say
@@ -351,6 +354,7 @@ class Shift(Base):
     __tablename__ = 'shifts'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g., "Morning", "Evening", "Night"
     start_time: Mapped[time] = mapped_column(nullable=False)  # e.g., 09:00
     end_time: Mapped[time] = mapped_column(nullable=False)  # e.g., 18:00
@@ -393,6 +397,7 @@ class AttendanceRule(Base):
     __tablename__ = 'attendance_rules'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g., "Late Entry After 9:30 AM"
     rule_type: Mapped[str] = mapped_column(String(60), nullable=False)  # late_entry, early_exit, half_day, etc.
     threshold_minutes: Mapped[int] = mapped_column(nullable=False)  # e.g., 30 minutes late = late entry
@@ -545,7 +550,8 @@ class LeaveType(Base):
     __tablename__ = 'leave_types'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=True)
     default_days_per_year: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -610,6 +616,7 @@ class Holiday(Base):
     __tablename__ = 'holidays'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     holiday_date: Mapped[date] = mapped_column(nullable=False, index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -656,7 +663,8 @@ class SalaryComponent(Base):
     __tablename__ = 'salary_components'
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey('tenants.id'), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     component_type: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

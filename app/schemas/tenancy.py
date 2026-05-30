@@ -6,6 +6,9 @@ from datetime import date
 class TenantCreate(BaseModel):
     name: str = Field(min_length=1)
     domain: Optional[str] = None
+    admin_name: str = Field(min_length=1)
+    admin_email: str = Field(min_length=3)
+    admin_password: str = Field(min_length=6)
 
 
 class TenantUpdate(BaseModel):

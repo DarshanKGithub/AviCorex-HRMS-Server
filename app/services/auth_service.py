@@ -214,3 +214,69 @@ def change_password(user: User, old_password: str, new_password: str, *, db: Ses
 
     user.password_hash = hash_password(new_password)
     db.commit()
+
+def register_tenant(payload, db: Session) -> User:
+    from app.db.models import Tenant, User, Employee, Subscription, Plan, TenantFeature
+    from app.core.security import hash_password
+    import uuid
+    from datetime import datetime, timezone
+    
+    email = payload.admin_email.lower().strip()
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status_code=400, detail='User already exists with this email')
+        
+    tenant_id = str(uuid.uuid4())
+    domain = email.split('@')[1] if '@' in email else None
+    new_tenant = Tenant(
+        id=tenant_id,
+        name=payload.company_name.strip(),
+        domain=domain,
+        is_active=True
+    )
+    db.add(new_tenant)
+    
+    user_id = str(uuid.uuid4())
+    new_user = User(
+        id=user_id,
+        tenant_id=tenant_id,
+        full_name=payload.admin_name.strip(),
+        email=email,
+        password_hash=hash_password(payload.password),
+        role='CEO',
+        is_active=True
+    )
+    db.add(new_user)
+    
+    new_employee = Employee(
+        id=user_id,
+        tenant_id=tenant_id,
+        full_name=payload.admin_name.strip(),
+        email=email,
+        is_active=True
+    )
+    db.add(new_employee)
+    
+    # Assign default plan
+    basic_plan = db.scalar(select(Plan).where(Plan.name == 'Basic Plan'))
+    if basic_plan:
+        sub = Subscription(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            plan_id=basic_plan.id,
+            status='active',
+            billing_period=basic_plan.billing_period,
+            starts_at=datetime.now(timezone.utc).date()
+        )
+        db.add(sub)
+        # copy features
+        for key in basic_plan.feature_keys:
+            db.add(TenantFeature(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                feature_key=key,
+                enabled=True
+            ))
+            
+    db.commit()
+    db.refresh(new_user)
+    return new_user

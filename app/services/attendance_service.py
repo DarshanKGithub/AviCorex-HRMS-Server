@@ -23,13 +23,17 @@ logger = logging.getLogger(__name__)
 class AttendanceRuleEngine:
     """Engine for evaluating attendance rules and determining attendance status."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, tenant_id: str | None = None):
         self.db = db
+        self.tenant_id = tenant_id
         self.rules = self._load_rules()
 
     def _load_rules(self) -> dict[str, AttendanceRule]:
         """Load active attendance rules from database."""
-        rules = self.db.query(AttendanceRule).filter(AttendanceRule.is_active.is_(True)).all()
+        query = self.db.query(AttendanceRule).filter(AttendanceRule.is_active.is_(True))
+        if self.tenant_id:
+            query = query.filter(AttendanceRule.tenant_id == self.tenant_id)
+        rules = query.all()
         return {rule.rule_type: rule for rule in rules}
 
     def calculate_late_minutes(self, check_in_time: datetime, shift: Shift) -> int:
@@ -117,10 +121,13 @@ class AttendanceRuleEngine:
         return 'present'
 
 
-def create_attendance(payload: AttendanceCreate, db: Session) -> Attendance:
+def create_attendance(payload: AttendanceCreate, db: Session, tenant_id: str | None = None) -> Attendance:
     """Create or update attendance record."""
     # Verify employee exists
-    employee = db.query(Employee).filter(Employee.id == payload.employee_id).first()
+    query = db.query(Employee).filter(Employee.id == payload.employee_id)
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    employee = query.first()
     if not employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
 
@@ -139,7 +146,7 @@ def create_attendance(payload: AttendanceCreate, db: Session) -> Attendance:
         )
 
     # Initialize rule engine
-    rule_engine = AttendanceRuleEngine(db)
+    rule_engine = AttendanceRuleEngine(db, tenant_id)
 
     # Get employee's shift for the date
     shift = get_employee_current_shift(payload.employee_id, payload.attendance_date, db)
@@ -180,18 +187,24 @@ def create_attendance(payload: AttendanceCreate, db: Session) -> Attendance:
     return attendance
 
 
-def get_attendance(attendance_id: str, db: Session) -> Attendance:
+def get_attendance(attendance_id: str, db: Session, tenant_id: str | None = None) -> Attendance:
     """Retrieve an attendance record by ID."""
-    attendance = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+    query = db.query(Attendance)
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    attendance = query.filter(Attendance.id == attendance_id).first()
     if not attendance:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Attendance record not found')
     return attendance
 
 
-def check_in(payload: CheckInRequest, db: Session) -> Attendance:
+def check_in(payload: CheckInRequest, db: Session, tenant_id: str | None = None) -> Attendance:
     """Record check-in for an employee."""
     # Verify employee exists
-    employee = db.query(Employee).filter(Employee.id == payload.employee_id).first()
+    query = db.query(Employee).filter(Employee.id == payload.employee_id)
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    employee = query.first()
     if not employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
 
@@ -204,7 +217,7 @@ def check_in(payload: CheckInRequest, db: Session) -> Attendance:
     ).first()
 
     # Initialize rule engine
-    rule_engine = AttendanceRuleEngine(db)
+    rule_engine = AttendanceRuleEngine(db, tenant_id)
 
     # Get employee's shift
     shift = get_employee_current_shift(payload.employee_id, payload.attendance_date, db)
@@ -247,10 +260,14 @@ def check_in(payload: CheckInRequest, db: Session) -> Attendance:
         return attendance
 
 
-def check_out(payload: CheckOutRequest, db: Session) -> Attendance:
+def check_out(payload: CheckOutRequest, db: Session, tenant_id: str | None = None) -> Attendance:
     """Record check-out for an employee."""
     # Get attendance record for today
-    attendance = db.query(Attendance).filter(
+    query = db.query(Attendance)
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    
+    attendance = query.filter(
         and_(
             Attendance.employee_id == payload.employee_id,
             Attendance.attendance_date == payload.attendance_date,
@@ -264,7 +281,7 @@ def check_out(payload: CheckOutRequest, db: Session) -> Attendance:
         )
 
     # Initialize rule engine
-    rule_engine = AttendanceRuleEngine(db)
+    rule_engine = AttendanceRuleEngine(db, tenant_id)
 
     # Get employee's shift
     shift = get_employee_current_shift(payload.employee_id, payload.attendance_date, db)
@@ -296,6 +313,7 @@ def check_out(payload: CheckOutRequest, db: Session) -> Attendance:
 
 def list_attendance(
     db: Session,
+    tenant_id: str | None = None,
     employee_id: str | None = None,
     start_date: date_type | None = None,
     end_date: date_type | None = None,
@@ -304,6 +322,9 @@ def list_attendance(
 ) -> tuple[list[Attendance], int]:
     """List attendance records with optional filters."""
     query = db.query(Attendance)
+
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
 
     if employee_id:
         query = query.filter(Attendance.employee_id == employee_id)
@@ -318,12 +339,12 @@ def list_attendance(
     return records, int(total)
 
 
-def update_attendance(attendance_id: str, payload: AttendanceUpdate, db: Session) -> Attendance:
+def update_attendance(attendance_id: str, payload: AttendanceUpdate, db: Session, tenant_id: str | None = None) -> Attendance:
     """Update an attendance record."""
-    attendance = get_attendance(attendance_id, db)
+    attendance = get_attendance(attendance_id, db, tenant_id)
 
     # Initialize rule engine for recalculation
-    rule_engine = AttendanceRuleEngine(db)
+    rule_engine = AttendanceRuleEngine(db, tenant_id)
 
     # Get employee's shift if needed for recalculation
     shift = get_employee_current_shift(attendance.employee_id, attendance.attendance_date, db)
@@ -357,9 +378,9 @@ def update_attendance(attendance_id: str, payload: AttendanceUpdate, db: Session
     return attendance
 
 
-def delete_attendance(attendance_id: str, db: Session) -> Attendance:
+def delete_attendance(attendance_id: str, db: Session, tenant_id: str | None = None) -> Attendance:
     """Delete an attendance record."""
-    attendance = get_attendance(attendance_id, db)
+    attendance = get_attendance(attendance_id, db, tenant_id)
     db.delete(attendance)
     db.commit()
     _write_attendance_audit_log(db, 'DELETE', attendance)
@@ -371,10 +392,14 @@ def get_employee_attendance_summary(
     start_date: date_type,
     end_date: date_type,
     db: Session,
+    tenant_id: str | None = None,
 ) -> EmployeeAttendanceSummary:
     """Get attendance summary for an employee within a date range."""
     # Verify employee exists
-    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    query = db.query(Employee).filter(Employee.id == employee_id)
+    if tenant_id:
+        query = query.filter(Employee.tenant_id == tenant_id)
+    employee = query.first()
     if not employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Employee not found')
 
