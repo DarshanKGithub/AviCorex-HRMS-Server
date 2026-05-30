@@ -10,6 +10,8 @@ from app.schemas.audit import PaginatedAuditLogs, AuditLogPublic
 from app.services.audit_service import create_audit_log, list_audit_logs
 from app.services.auth_service import to_public_user
 from app.db.models import User as DbUser
+from app.core.config import settings
+import stripe
 from app.schemas.auth import UserPublic as UserPublicSchema
 from app.schemas.tenancy import (
     TenantCreate,
@@ -474,19 +476,60 @@ def create_tenant_subscription(
     else:
         ends_at = start_date + timedelta(days=duration_days)
 
+    status = payload.status or 'active'
+    checkout_url = None
+    
+    if plan.price_cents > 0 and settings.stripe_secret_key:
+        status = 'pending_payment'
+
     subscription = Subscription(
         tenant_id=tenant.id,
         plan_id=plan.id,
         starts_at=start_date,
         ends_at=ends_at,
-        status=payload.status or 'active',
+        status=status,
         price_paid_cents=plan.price_cents,
     )
     db.add(subscription)
-    _sync_subscription_features(tenant.id, plan, db)
     db.commit()
     db.refresh(subscription)
-    return _subscription_to_public(subscription, db)
+
+    if status == 'pending_payment' and settings.stripe_secret_key:
+        stripe.api_key = settings.stripe_secret_key
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'inr',
+                        'product_data': {
+                            'name': f"{plan.name} Subscription",
+                            'description': plan.description or f"{plan.billing_period} billing",
+                        },
+                        'unit_amount': plan.price_cents,
+                    },
+                    'quantity': 1,
+                }],
+                mode='payment',
+                success_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=success",
+                cancel_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=cancelled",
+                metadata={
+                    'subscription_id': subscription.id,
+                    'tenant_id': tenant.id,
+                    'plan_id': plan.id,
+                }
+            )
+            checkout_url = session.url
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Instantly activate and sync features
+        _sync_subscription_features(tenant.id, plan, db)
+        db.commit()
+
+    resp = _subscription_to_public(subscription, db)
+    resp.checkout_url = checkout_url
+    return resp
 
 
 @router.get('/subscriptions', response_model=list[SubscriptionPublic])

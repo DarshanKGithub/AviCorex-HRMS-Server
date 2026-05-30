@@ -63,10 +63,12 @@ app.include_router(lifecycle_router, prefix='/lifecycle', tags=['lifecycle'])
 from app.api.routes.admin import router as admin_router
 from app.api.routes.billing import router as billing_router
 from app.api.routes.tenants import router as tenants_router
+from app.api.routes.webhooks import router as webhooks_router
 
 app.include_router(admin_router, prefix='/admin', tags=['admin'])
 app.include_router(billing_router, prefix='/billing', tags=['billing'])
 app.include_router(tenants_router, prefix='/tenants', tags=['tenants'])
+app.include_router(webhooks_router, prefix='/api/webhooks', tags=['webhooks'])
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 
 
@@ -80,11 +82,11 @@ def startup() -> None:
     from os import getenv
     if getenv('AUTO_APPLY_SCHEMA_CHANGES', 'true').lower() in ('1', 'true', 'yes'):
         try:
-            from app.fix_db import backfill_columns
+            from app.fix_db import backfill_columns  # type: ignore
         except Exception:
             # fallback to top-level fix_db script
             try:
-                from fix_db import backfill_columns
+                from fix_db import backfill_columns  # type: ignore
             except Exception:
                 backfill_columns = None
 
