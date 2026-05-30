@@ -511,7 +511,7 @@ def create_tenant_subscription(
                     'quantity': 1,
                 }],
                 mode='payment',
-                success_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=success",
+                success_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=success&session_id={{CHECKOUT_SESSION_ID}}",
                 cancel_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=cancelled",
                 metadata={
                     'subscription_id': subscription.id,
@@ -536,6 +536,36 @@ def create_tenant_subscription(
 def list_subscriptions(actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
     rows = db.query(Subscription).all()
     return [_subscription_to_public(row, db) for row in rows]
+
+
+@router.post('/subscriptions/verify-payment')
+def verify_payment(session_id: str, actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=400, detail="Stripe not configured")
+    
+    stripe.api_key = settings.stripe_secret_key
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    if session.payment_status == 'paid':
+        metadata = session.get('metadata', {})
+        subscription_id = metadata.get('subscription_id')
+        tenant_id = metadata.get('tenant_id')
+        plan_id = metadata.get('plan_id')
+        
+        if subscription_id and tenant_id and plan_id:
+            subscription = db.scalar(select(Subscription).where(Subscription.id == subscription_id))
+            if subscription and subscription.status == 'pending_payment':
+                subscription.status = 'active'
+                plan = db.scalar(select(Plan).where(Plan.id == plan_id))
+                if plan:
+                    _sync_subscription_features(tenant_id, plan, db)
+                db.commit()
+                return {"status": "success", "message": "Payment verified and subscription activated"}
+    
+    return {"status": "pending", "message": "Payment not yet verified or already processed"}
 
 
 @router.get('/tenants/{tenant_id}/subscriptions', response_model=list[SubscriptionPublic])
