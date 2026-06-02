@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TimesheetBase(BaseModel):
@@ -8,7 +8,7 @@ class TimesheetBase(BaseModel):
     date: date
     project_id: Optional[str] = None
     task_description: str
-    hours_worked: float
+    hours_worked: float = Field(..., ge=0, description="Hours worked cannot be negative")
     status: Optional[str] = 'Draft'
 
 
