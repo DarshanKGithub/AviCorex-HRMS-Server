@@ -591,6 +591,8 @@ class LeaveRequest(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default='pending')  # pending, approved, rejected, cancelled
     approver_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id'), nullable=True)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     leave_type: Mapped['LeaveType'] = relationship('LeaveType', lazy='selectin')
     employee: Mapped['Employee'] = relationship('Employee', lazy='selectin', foreign_keys=[employee_id])

@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '0002_ensure_employee_phone_column'
+revision = '0002_ensure_emp_phone_col'
 down_revision = '0001_add_phone_to_employees'
 branch_labels = None
 depends_on = None

@@ -10,8 +10,8 @@ from app.db.models import LeaveRequest, LeaveType, LeaveBalance, Employee, Audit
 
 # File upload configuration
 LEAVE_UPLOADS_DIR = Path(__file__).resolve().parents[2] / 'uploads' / 'leave_attachments'
-MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
-ALLOWED_FILE_TYPES = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg'}
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+ALLOWED_FILE_TYPES = {'pdf'}
 
 
 def _ensure_leave_uploads_dir() -> None:

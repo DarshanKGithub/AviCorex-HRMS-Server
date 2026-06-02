@@ -16,7 +16,8 @@ config = context.config
 # Interpret the config file for Python logging.
 fileConfig(config.config_file_name)
 
-from app.db.database import Base, engine
+from app.db.models import Base
+from app.db.database import engine
 
 # set sqlalchemy.url from env if provided
 db_url = os.getenv('DATABASE_URL')

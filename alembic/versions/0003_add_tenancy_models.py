@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = '0003_add_tenancy_models'
-down_revision = '0002_ensure_employee_phone_column'
+down_revision = '0002_ensure_emp_phone_col'
 branch_labels = None
 depends_on = None
 
