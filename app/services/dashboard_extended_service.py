@@ -84,7 +84,7 @@ def get_my_space_dashboard(
                 leave_type=leave_req.leave_type.name if leave_req.leave_type else 'Leave',
                 start_date=leave_req.start_date,
                 end_date=leave_req.end_date,
-                days=leave_req.number_of_days,
+                days=leave_req.days_requested,
                 reason=leave_req.reason or '',
                 status=leave_req.status,
                 requested_at=_leave_timestamp(leave_req),
