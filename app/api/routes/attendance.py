@@ -16,6 +16,7 @@ from app.schemas.attendance import (
     EmployeeShiftAssignmentPublic,
     PaginatedEmployeeShiftAssignments,
     AttendanceCreate,
+    AttendanceUpdate,
     AttendancePublic,
     PaginatedAttendance,
     CheckInRequest,
@@ -235,6 +236,18 @@ def get_attendance_endpoint(
     attendance = get_attendance(attendance_id, db, tenant_id=user.tenant_id)
     if attendance.employee_id != user.id and not has_permission(user.role, 'view_attendance'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees attendance')
+    return AttendancePublic.model_validate(_attendance_to_dict(attendance))
+
+
+@router.patch('/{attendance_id}', response_model=AttendancePublic)
+def update_attendance_endpoint(
+    attendance_id: str,
+    payload: AttendanceUpdate,
+    _user: User = Depends(require_permissions('manage_attendance_records')),
+    db: Session = Depends(get_db),
+) -> AttendancePublic:
+    """Adjust an attendance record (Admin/HR only)."""
+    attendance = update_attendance(attendance_id, payload, db, tenant_id=_user.tenant_id)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 
