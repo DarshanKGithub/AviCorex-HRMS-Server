@@ -258,8 +258,10 @@ def get_calendar_events(
     *,
     db: Session,
     employee_id: str,
+    role: str = 'Employee',
     start_date: date,
     end_date: date,
+    view_type: str = 'personal',
 ) -> CalendarResponse:
     """Get calendar events for a date range."""
     
@@ -276,7 +278,7 @@ def get_calendar_events(
     holiday_list = []
     for holiday in holidays:
         events.append(CalendarEvent(
-            id=holiday.id,
+            id=f"hol_{holiday.id}",
             title=holiday.name,
             start_time=datetime.combine(holiday.holiday_date, datetime.min.time()),
             end_time=datetime.combine(holiday.holiday_date, datetime.max.time()),
@@ -289,26 +291,45 @@ def get_calendar_events(
             'name': holiday.name,
         })
     
-    # Get approved leaves for employee
-    leaves = db.query(LeaveRequest).filter(
-        and_(
-            LeaveRequest.employee_id == employee_id,
-            LeaveRequest.start_date <= end_date,
-            LeaveRequest.end_date >= start_date,
-            LeaveRequest.status == 'approved'
-        )
-    ).all()
+    # Determine leave filtering
+    leave_filters = [
+        LeaveRequest.start_date <= end_date,
+        LeaveRequest.end_date >= start_date,
+        LeaveRequest.status == 'approved'
+    ]
+    
+    if view_type == 'team' and role in ['Manager', 'HR', 'Admin']:
+        # Admin/HR/Manager can see all approved leaves
+        pass
+    else:
+        # Employees only see their own
+        leave_filters.append(LeaveRequest.employee_id == employee_id)
+        
+    leaves = db.query(LeaveRequest).filter(and_(*leave_filters)).all()
     
     for leave in leaves:
+        employee_name = None
+        if leave.employee_id != employee_id or view_type == 'team':
+            # Fetch employee name if needed
+            emp = db.query(Employee).filter(Employee.id == leave.employee_id).first()
+            if emp:
+                employee_name = emp.full_name
+                
+        title = f'{leave.leave_type.name if leave.leave_type else "Leave"}'
+        if employee_name and view_type == 'team':
+            title = f"{employee_name} - {title}"
+
         events.append(CalendarEvent(
-            id=leave.id,
-            title=f'{leave.leave_type.name if leave.leave_type else "Leave"}',
+            id=f"lv_{leave.id}",
+            title=title,
             start_time=datetime.combine(leave.start_date, datetime.min.time()),
             end_time=datetime.combine(leave.end_date, datetime.max.time()),
             event_type='leave',
             is_all_day=True,
-            color='#4dabf7',
+            color='#4dabf7' if leave.employee_id == employee_id else '#928ddd',
             description=leave.reason,
+            employee_name=employee_name or 'You',
+            employee_id=leave.employee_id,
         ))
     
     return CalendarResponse(

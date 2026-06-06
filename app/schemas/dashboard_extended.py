@@ -165,6 +165,8 @@ class CalendarEvent(BaseModel):
     recurring: Optional[str] = None  # 'daily', 'weekly', 'monthly', None
     status: str = 'confirmed'  # 'confirmed', 'tentative', 'cancelled'
     reminder_at: Optional[datetime] = None
+    employee_name: Optional[str] = None
+    employee_id: Optional[str] = None
 
     class Config:
         from_attributes = True

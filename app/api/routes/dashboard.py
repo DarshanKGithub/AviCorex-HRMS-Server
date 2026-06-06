@@ -84,6 +84,7 @@ def get_organization(
 def get_calendar(
     start_date: date = Query(..., description='Start date in YYYY-MM-DD format'),
     end_date: date = Query(..., description='End date in YYYY-MM-DD format'),
+    view_type: str = Query('personal', description='View type: "personal" or "team"'),
     _current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CalendarResponse:
@@ -97,8 +98,10 @@ def get_calendar(
     return get_calendar_events(
         db=db,
         employee_id=_current_user.id,
+        role=_current_user.role,
         start_date=start_date,
         end_date=end_date,
+        view_type=view_type,
     )
 
 
