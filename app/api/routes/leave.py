@@ -447,6 +447,10 @@ def get_leave_history(
             actor = db.query(User).filter(User.id == log.actor_id).first()
             if actor:
                 actor_name = actor.full_name
+        
+        if not actor_name and log.action == 'create' and getattr(lr, 'employee', None):
+            actor_name = lr.employee.full_name
+
         history.append({
             'id': log.id,
             'action': log.action,

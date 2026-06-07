@@ -97,7 +97,7 @@ def create_leave_request(employee_id: str, payload, db: Session, tenant_id: str 
 
     # audit
     try:
-        db.add(AuditLog(actor_id=None, action='create', object_type='leave_request', object_id=lr.id, data=str({'employee_id': employee_id, 'days': days})))
+        db.add(AuditLog(actor_id=employee_id, action='create', object_type='leave_request', object_id=lr.id, data=str({'employee_id': employee_id, 'days': days})))
         db.commit()
     except Exception:
         db.rollback()
