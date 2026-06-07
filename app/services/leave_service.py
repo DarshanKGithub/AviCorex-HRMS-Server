@@ -130,7 +130,10 @@ def list_leave_requests(db: Session, tenant_id: str | None = None, employee_id: 
     if manager_id:
         query = query.filter(Employee.manager_id == manager_id)
     if status_filter:
-        query = query.filter(LeaveRequest.status == status_filter)
+        if status_filter == 'pending_all':
+            query = query.filter(LeaveRequest.status.in_(['pending', 'pending_manager', 'pending_hr']))
+        else:
+            query = query.filter(LeaveRequest.status == status_filter)
 
     total = query.with_entities(func.count(LeaveRequest.id)).scalar() or 0
     items = query.order_by(LeaveRequest.created_at.desc()).offset((page - 1) * size).limit(size).all()
