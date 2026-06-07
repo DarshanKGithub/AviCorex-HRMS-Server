@@ -18,6 +18,8 @@ from app.schemas.leave import (
     BulkApproveResult,
     HolidayCreate,
     HolidayPublic,
+    LeaveHistoryItem,
+    CCOptionsPublic,
 )
 from app.services.leave_service import (
     create_leave_request,
@@ -391,3 +393,65 @@ async def upload_leave_attachment(
     file_path = save_leave_attachment(request_id, file.filename or 'file', content)
     
     return {'file_path': file_path, 'filename': file.filename}
+
+
+@router.get('/cc-options', response_model=CCOptionsPublic)
+def get_cc_options(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import Employee
+    employee = db.query(Employee).filter(Employee.id == user.id).first()
+    
+    manager = None
+    if employee and employee.manager_id:
+        mgr_user = db.query(User).filter(User.id == employee.manager_id).first()
+        if mgr_user:
+            manager = {
+                'id': mgr_user.id,
+                'name': mgr_user.full_name,
+                'email': mgr_user.email,
+                'role': mgr_user.role,
+            }
+            
+    hrs = db.query(User).filter(User.role == 'HR', User.is_active == True, User.tenant_id == user.tenant_id).all()
+    ceos = db.query(User).filter(User.role == 'CEO', User.is_active == True, User.tenant_id == user.tenant_id).all()
+    
+    hr_list = [{'id': hr.id, 'name': hr.full_name, 'email': hr.email, 'role': hr.role} for hr in hrs]
+    ceo_list = [{'id': ceo.id, 'name': ceo.full_name, 'email': ceo.email, 'role': ceo.role} for ceo in ceos]
+    
+    return CCOptionsPublic(manager=manager, hr=hr_list, ceo=ceo_list)
+
+
+@router.get('/requests/{request_id}/history', response_model=list[LeaveHistoryItem])
+def get_leave_history(
+    request_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import AuditLog
+    # Ensure user can view this request
+    lr = get_leave_request(request_id, db, tenant_id=user.tenant_id)
+    if lr.employee_id != user.id and not has_permission(user.role, 'view_leave'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view other employees requests')
+
+    logs = db.query(AuditLog).filter(
+        AuditLog.object_type == 'leave_request',
+        AuditLog.object_id == request_id
+    ).order_by(AuditLog.created_at.asc()).all()
+    
+    history = []
+    for log in logs:
+        actor_name = None
+        if log.actor_id:
+            actor = db.query(User).filter(User.id == log.actor_id).first()
+            if actor:
+                actor_name = actor.full_name
+        history.append({
+            'id': log.id,
+            'action': log.action,
+            'actor_name': actor_name,
+            'created_at': log.created_at
+        })
+        
+    return history

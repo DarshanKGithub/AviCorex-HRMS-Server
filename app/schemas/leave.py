@@ -104,3 +104,20 @@ class HolidayPublic(BaseModel):
     holiday_date: date
     is_public: bool
     created_at: datetime
+
+class CCOption(BaseModel):
+    id: str
+    name: str
+    email: str
+    role: str
+
+class CCOptionsPublic(BaseModel):
+    manager: CCOption | None = None
+    hr: list[CCOption] = Field(default_factory=list)
+    ceo: list[CCOption] = Field(default_factory=list)
+
+class LeaveHistoryItem(BaseModel):
+    id: str
+    action: str
+    actor_name: str | None = None
+    created_at: datetime

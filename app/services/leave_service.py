@@ -89,7 +89,7 @@ def create_leave_request(employee_id: str, payload, db: Session, tenant_id: str 
         contact_details=payload.contact_details,
         cc_to=cc_to_json,
         attachment_paths=attachment_paths_json,
-        status='pending',
+        status='pending_manager' if emp.manager_id else 'pending_hr',
     )
     db.add(lr)
     db.commit()
@@ -152,25 +152,41 @@ def _get_or_create_balance(employee_id: str, leave_type_id: str, year: int, db: 
 
 
 def approve_leave(leave_id: str, approver_id: str, approve: bool, db: Session, tenant_id: str | None = None) -> LeaveRequest:
+    from app.db.models import User
     lr = get_leave_request(leave_id, db, tenant_id)
-    if lr.status not in ['pending']:
+    if lr.status not in ['pending', 'pending_manager', 'pending_hr']:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Leave request is not pending')
 
+    user = db.query(User).filter(User.id == approver_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Approver not found')
+
     if approve:
-        year = lr.start_date.year
-        bal = _get_or_create_balance(lr.employee_id, lr.leave_type_id, year, db)
-        if bal.balance_days < lr.days_requested:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Insufficient leave balance')
-        bal.balance_days -= lr.days_requested
-        bal.updated_at = datetime.now()
-        lr.status = 'approved'
-        lr.approver_id = approver_id
-        lr.approved_at = datetime.now()
-        lr.updated_at = datetime.now()
-        db.add(bal)
-        db.add(lr)
-        db.commit()
-        db.refresh(lr)
+        if lr.status in ['pending', 'pending_manager']:
+            # Move to HR approval
+            lr.status = 'pending_hr'
+            lr.updated_at = datetime.now()
+            db.add(lr)
+            db.commit()
+            db.refresh(lr)
+        elif lr.status == 'pending_hr':
+            if user.role not in ['HR', 'Admin', 'CEO']:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only HR or Admin can finally approve')
+
+            year = lr.start_date.year
+            bal = _get_or_create_balance(lr.employee_id, lr.leave_type_id, year, db)
+            if bal.balance_days < lr.days_requested:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Insufficient leave balance')
+            bal.balance_days -= lr.days_requested
+            bal.updated_at = datetime.now()
+            lr.status = 'approved'
+            lr.approver_id = approver_id
+            lr.approved_at = datetime.now()
+            lr.updated_at = datetime.now()
+            db.add(bal)
+            db.add(lr)
+            db.commit()
+            db.refresh(lr)
     else:
         lr.status = 'rejected'
         lr.approver_id = approver_id
