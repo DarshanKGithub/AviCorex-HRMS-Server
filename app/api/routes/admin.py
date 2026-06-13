@@ -11,7 +11,7 @@ from app.services.audit_service import create_audit_log, list_audit_logs
 from app.services.auth_service import to_public_user
 from app.db.models import User as DbUser
 from app.core.config import settings
-import stripe
+import razorpay
 from app.schemas.auth import UserPublic as UserPublicSchema
 from app.schemas.tenancy import (
     TenantCreate,
@@ -593,9 +593,10 @@ def create_tenant_subscription(
         ends_at = start_date + timedelta(days=duration_days)
 
     status = payload.status or 'active'
-    checkout_url = None
+    razorpay_order_id = None
+    razorpay_key = None
     
-    if plan.price_cents > 0 and settings.stripe_secret_key:
+    if plan.price_cents > 0 and settings.razorpay_key_id and settings.razorpay_key_secret:
         status = 'pending_payment'
 
     subscription = Subscription(
@@ -610,32 +611,21 @@ def create_tenant_subscription(
     db.commit()
     db.refresh(subscription)
 
-    if status == 'pending_payment' and settings.stripe_secret_key:
-        stripe.api_key = settings.stripe_secret_key
+    if status == 'pending_payment' and settings.razorpay_key_id and settings.razorpay_key_secret:
         try:
-            session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
-                    'price_data': {
-                        'currency': 'inr',
-                        'product_data': {
-                            'name': f"{plan.name} Subscription",
-                            'description': plan.description or f"{plan.billing_period} billing",
-                        },
-                        'unit_amount': plan.price_cents,
-                    },
-                    'quantity': 1,
-                }],
-                mode='payment',
-                success_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=success&session_id={{CHECKOUT_SESSION_ID}}",
-                cancel_url=f"{settings.frontend_origins.split(',')[0]}/admin/clients?payment=cancelled",
-                metadata={
-                    'subscription_id': subscription.id,
-                    'tenant_id': tenant.id,
-                    'plan_id': plan.id,
+            client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+            order = client.order.create({
+                "amount": plan.price_cents,
+                "currency": "INR",
+                "receipt": str(subscription.id)[:40],
+                "notes": {
+                    "subscription_id": str(subscription.id),
+                    "tenant_id": str(tenant.id),
+                    "plan_id": str(plan.id),
                 }
-            )
-            checkout_url = session.url
+            })
+            razorpay_order_id = order['id']
+            razorpay_key = settings.razorpay_key_id
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     else:
@@ -644,7 +634,8 @@ def create_tenant_subscription(
         db.commit()
 
     resp = _subscription_to_public(subscription, db)
-    resp.checkout_url = checkout_url
+    resp.razorpay_order_id = razorpay_order_id
+    resp.razorpay_key = razorpay_key
     return resp
 
 
@@ -654,19 +645,32 @@ def list_subscriptions(actor: User = Depends(require_permissions('manage_setting
     return [_subscription_to_public(row, db) for row in rows]
 
 
+from pydantic import BaseModel
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+
 @router.post('/subscriptions/verify-payment')
-def verify_payment(session_id: str, actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
-    if not settings.stripe_secret_key:
-        raise HTTPException(status_code=400, detail="Stripe not configured")
+def verify_payment(payload: VerifyPaymentRequest, actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
+    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+        raise HTTPException(status_code=400, detail="Razorpay not configured")
     
-    stripe.api_key = settings.stripe_secret_key
     try:
-        session = stripe.checkout.Session.retrieve(session_id)
+        client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+        client.utility.verify_payment_signature({
+            'razorpay_payment_id': payload.razorpay_payment_id,
+            'razorpay_order_id': payload.razorpay_order_id,
+            'razorpay_signature': payload.razorpay_signature
+        })
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
         
-    if session.payment_status == 'paid':
-        metadata = session.get('metadata', {})
+    # If signature verification is successful, fetch the order notes
+    try:
+        order = client.order.fetch(payload.razorpay_order_id)
+        metadata = order.get('notes', {})
         subscription_id = metadata.get('subscription_id')
         tenant_id = metadata.get('tenant_id')
         plan_id = metadata.get('plan_id')
@@ -680,8 +684,10 @@ def verify_payment(session_id: str, actor: User = Depends(require_permissions('m
                     _sync_subscription_features(tenant_id, plan, db)
                 db.commit()
                 return {"status": "success", "message": "Payment verified and subscription activated"}
-    
-    return {"status": "pending", "message": "Payment not yet verified or already processed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process order metadata: {str(e)}")
+
+    return {"status": "success", "message": "Payment verified but subscription not activated (already active or missing metadata)"}
 
 
 @router.get('/tenants/{tenant_id}/subscriptions', response_model=list[SubscriptionPublic])

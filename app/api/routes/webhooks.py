@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-import stripe
+import razorpay
+import json
 
 from app.core.config import settings
 from app.db.database import get_db
@@ -10,34 +11,28 @@ from app.api.routes.admin import _sync_subscription_features
 
 router = APIRouter()
 
-@router.post('/stripe')
-async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+@router.post('/razorpay')
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
-    sig_header = request.headers.get('stripe-signature')
+    sig_header = request.headers.get('x-razorpay-signature')
     
     if not sig_header:
         raise HTTPException(status_code=400, detail='Missing signature header')
         
     try:
-        # If no webhook secret is set in config, we can bypass verification for testing,
-        # but ideally it should be verified.
-        if settings.stripe_webhook_secret:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.stripe_webhook_secret
-            )
-        else:
-            # Fallback for dev/test without webhook secret
-            import json
-            event = json.loads(payload)
+        if settings.razorpay_webhook_secret and settings.razorpay_key_id and settings.razorpay_key_secret:
+            client = razorpay.Client(auth=(settings.razorpay_key_id, settings.razorpay_key_secret))
+            client.utility.verify_webhook_signature(payload.decode('utf-8'), sig_header, settings.razorpay_webhook_secret)
+        
+        event = json.loads(payload)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Handle the checkout.session.completed event
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
+    # Handle the order.paid event
+    if event.get('event') == 'order.paid':
+        order = event['payload']['order']['entity']
         
-        # Fulfill the purchase...
-        metadata = session.get('metadata', {})
+        metadata = order.get('notes', {})
         subscription_id = metadata.get('subscription_id')
         tenant_id = metadata.get('tenant_id')
         plan_id = metadata.get('plan_id')

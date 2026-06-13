@@ -113,4 +113,5 @@ class SubscriptionPublic(BaseModel):
     ends_at: Optional[date] = None
     status: str
     price_paid_cents: Optional[int] = None
-    checkout_url: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
+    razorpay_key: Optional[str] = None
