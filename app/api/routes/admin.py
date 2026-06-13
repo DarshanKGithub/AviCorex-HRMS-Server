@@ -180,7 +180,12 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
         Holiday, SalaryComponent, TenantFeature, Subscription, EmployeeShiftAssignment,
         Attendance, LeaveBalance, LeaveRequest, TodoItem, GatePass, Salary, 
         EmployeeSalaryComponent, Payslip, PayslipComponent, SalaryHistory, 
-        Timesheet, OvertimeRequest
+        Timesheet, OvertimeRequest, AttendanceRegularization, CompOffRequest,
+        BiometricLog, PerformanceAppraisal, Goal, KPI, EmployeeTraining, Certification,
+        HelpdeskTicket, EmployeeGrievance, EmployeeDocument, OfferLetter, OnboardingTask,
+        ExitInterview, EmployeeResignation, DisciplinaryAction, WarningLetter,
+        PerformanceReview, PerformanceFeedback, JobPosting, JobApplication,
+        Notification, NotificationPreference, Announcement, Survey, SurveyQuestion, SurveyResponse
     )
 
     try:
@@ -195,8 +200,28 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
             db.query(GatePass).filter(GatePass.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             db.query(Timesheet).filter(Timesheet.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             db.query(OvertimeRequest).filter(OvertimeRequest.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(AttendanceRegularization).filter(AttendanceRegularization.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(CompOffRequest).filter(CompOffRequest.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(BiometricLog).filter(BiometricLog.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(PerformanceAppraisal).filter(PerformanceAppraisal.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(Goal).filter(Goal.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(KPI).filter(KPI.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeTraining).filter(EmployeeTraining.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(Certification).filter(Certification.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(HelpdeskTicket).filter(HelpdeskTicket.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeGrievance).filter(EmployeeGrievance.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeDocument).filter(EmployeeDocument.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(OfferLetter).filter(OfferLetter.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(OnboardingTask).filter(OnboardingTask.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(ExitInterview).filter(ExitInterview.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeResignation).filter(EmployeeResignation.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(DisciplinaryAction).filter(DisciplinaryAction.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(WarningLetter).filter(WarningLetter.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(PerformanceReview).filter(PerformanceReview.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(PerformanceFeedback).filter(PerformanceFeedback.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             db.query(EmployeeShiftAssignment).filter(EmployeeShiftAssignment.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             db.query(EmployeeSalaryComponent).filter(EmployeeSalaryComponent.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            
             
             # Nested dependencies for Payslip
             payslip_ids = db.scalars(select(Payslip.id).where(Payslip.employee_id.in_(employee_ids))).all()
@@ -215,6 +240,24 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
             db.query(Employee).filter(Employee.tenant_id == tenant_id).update({"manager_id": None}, synchronize_session=False)
 
         # Delete tenant-dependent records
+        department_ids = db.scalars(select(Department.id).where(Department.tenant_id == tenant_id)).all()
+        if department_ids:
+            job_posting_ids = db.scalars(select(JobPosting.id).where(JobPosting.department_id.in_(department_ids))).all()
+            if job_posting_ids:
+                db.query(JobApplication).filter(JobApplication.job_id.in_(job_posting_ids)).delete(synchronize_session=False)
+            db.query(JobPosting).filter(JobPosting.department_id.in_(department_ids)).delete(synchronize_session=False)
+
+        user_ids = db.scalars(select(DbUser.id).where(DbUser.tenant_id == tenant_id)).all()
+        if user_ids:
+            survey_ids = db.scalars(select(Survey.id).where(Survey.created_by.in_(user_ids))).all()
+            if survey_ids:
+                db.query(SurveyResponse).filter(SurveyResponse.survey_id.in_(survey_ids)).delete(synchronize_session=False)
+                db.query(SurveyQuestion).filter(SurveyQuestion.survey_id.in_(survey_ids)).delete(synchronize_session=False)
+            db.query(Survey).filter(Survey.created_by.in_(user_ids)).delete(synchronize_session=False)
+            db.query(Announcement).filter(Announcement.author_id.in_(user_ids)).delete(synchronize_session=False)
+            db.query(Notification).filter(Notification.recipient_id.in_(user_ids)).delete(synchronize_session=False)
+            db.query(NotificationPreference).filter(NotificationPreference.user_id.in_(user_ids)).delete(synchronize_session=False)
+
         db.query(Employee).filter(Employee.tenant_id == tenant_id).delete(synchronize_session=False)
         db.query(DbUser).filter(DbUser.tenant_id == tenant_id).delete(synchronize_session=False)
         db.query(TenantFeature).filter(TenantFeature.tenant_id == tenant_id).delete(synchronize_session=False)
