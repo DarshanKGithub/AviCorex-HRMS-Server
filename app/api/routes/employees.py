@@ -23,7 +23,8 @@ router = APIRouter()
 @router.get('/', response_model=PaginatedEmployees)
 def employees(page: int = 1, size: int = 20, q: str | None = None, department_id: str | None = None,
               designation_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(require_permissions('view_employee'))):
-    items, total = search_employees(db=db, page=page, size=size, q=q, department_id=department_id, designation_id=designation_id, tenant_id=user.tenant_id)
+    is_super_admin = user.role == 'Super Admin'
+    items, total = search_employees(db=db, page=page, size=size, q=q, department_id=department_id, designation_id=designation_id, tenant_id=user.tenant_id, is_super_admin=is_super_admin)
     return PaginatedEmployees(
         items=[EmployeePublic(
             id=e.id,

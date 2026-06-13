@@ -19,12 +19,17 @@ def list_employees(db: Session, tenant_id: str | None = None) -> List[Employee]:
 
 
 def search_employees(db: Session, page: int = 1, size: int = 20, q: str | None = None,
-                     department_id: str | None = None, designation_id: str | None = None, tenant_id: str | None = None) -> Tuple[List[Employee], int]:
+                     department_id: str | None = None, designation_id: str | None = None, tenant_id: str | None = None, is_super_admin: bool = False) -> Tuple[List[Employee], int]:
     """Return (items, total) for employees matching optional filters with pagination."""
     stmt = select(Employee)
     filters = []
-    if tenant_id:
+    
+    if is_super_admin:
+        stmt = stmt.join(User, User.id == Employee.id)
+        filters.append(User.role.in_(['CEO', 'Admin']))
+    elif tenant_id:
         filters.append(Employee.tenant_id == tenant_id)
+        
     if q:
         like = f"%{q.lower()}%"
         filters.append(func.lower(Employee.full_name).like(like) | func.lower(Employee.email).like(like))
