@@ -174,9 +174,66 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
     t = db.scalar(select(Tenant).where(Tenant.id == tenant_id))
     if not t:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Tenant not found')
-    db.delete(t)
-    db.commit()
-    return {'message': 'Tenant deleted'}
+        
+    from app.db.models import (
+        User as DbUser, Employee, Department, Designation, Shift, AttendanceRule, LeaveType, 
+        Holiday, SalaryComponent, TenantFeature, Subscription, EmployeeShiftAssignment,
+        Attendance, LeaveBalance, LeaveRequest, TodoItem, GatePass, Salary, 
+        EmployeeSalaryComponent, Payslip, PayslipComponent, SalaryHistory, 
+        Timesheet, OvertimeRequest
+    )
+
+    try:
+        # Delete employee-dependent records
+        employee_ids = db.scalars(select(Employee.id).where(Employee.tenant_id == tenant_id)).all()
+        if employee_ids:
+            # First level dependencies
+            db.query(Attendance).filter(Attendance.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(LeaveBalance).filter(LeaveBalance.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(LeaveRequest).filter(LeaveRequest.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(TodoItem).filter(TodoItem.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(GatePass).filter(GatePass.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(Timesheet).filter(Timesheet.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(OvertimeRequest).filter(OvertimeRequest.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeShiftAssignment).filter(EmployeeShiftAssignment.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(EmployeeSalaryComponent).filter(EmployeeSalaryComponent.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            
+            # Nested dependencies for Payslip
+            payslip_ids = db.scalars(select(Payslip.id).where(Payslip.employee_id.in_(employee_ids))).all()
+            if payslip_ids:
+                db.query(PayslipComponent).filter(PayslipComponent.payslip_id.in_(payslip_ids)).delete(synchronize_session=False)
+            db.query(Payslip).filter(Payslip.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            
+            # Nested dependencies for Salary
+            salary_ids = db.scalars(select(Salary.id).where(Salary.employee_id.in_(employee_ids))).all()
+            if salary_ids:
+                db.query(SalaryHistory).filter(SalaryHistory.salary_id.in_(salary_ids)).delete(synchronize_session=False)
+            db.query(SalaryHistory).filter(SalaryHistory.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            db.query(Salary).filter(Salary.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+            
+            # Break manager self-referential FK before deleting employees
+            db.query(Employee).filter(Employee.tenant_id == tenant_id).update({"manager_id": None}, synchronize_session=False)
+
+        # Delete tenant-dependent records
+        db.query(Employee).filter(Employee.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(DbUser).filter(DbUser.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(TenantFeature).filter(TenantFeature.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(Department).filter(Department.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(Designation).filter(Designation.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(Shift).filter(Shift.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(AttendanceRule).filter(AttendanceRule.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(LeaveType).filter(LeaveType.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(Holiday).filter(Holiday.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(SalaryComponent).filter(SalaryComponent.tenant_id == tenant_id).delete(synchronize_session=False)
+        db.query(Subscription).filter(Subscription.tenant_id == tenant_id).delete(synchronize_session=False)
+        
+        # Finally delete tenant
+        db.delete(t)
+        db.commit()
+        return {'message': 'Tenant deleted'}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- User tenancy management ---
@@ -579,6 +636,21 @@ def list_tenant_subscriptions(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Tenant not found')
     rows = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).all()
     return [_subscription_to_public(row, db) for row in rows]
+
+
+@router.delete('/subscriptions/{subscription_id}')
+def cancel_subscription(subscription_id: str, actor: User = Depends(require_permissions('manage_settings')), db: Session = Depends(get_db)):
+    sub = db.scalar(select(Subscription).where(Subscription.id == subscription_id))
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Subscription not found')
+    
+    sub.status = 'cancelled'
+    
+    # Also disable related tenant features if we cancel the subscription
+    db.query(TenantFeature).filter(TenantFeature.tenant_id == sub.tenant_id, TenantFeature.feature_key.like('subscription_%')).update({"enabled": False}, synchronize_session=False)
+    
+    db.commit()
+    return {'message': 'Subscription cancelled'}
 
 
 # Tenant features
