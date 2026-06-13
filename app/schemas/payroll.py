@@ -31,6 +31,13 @@ class SalaryComponentCreate(BaseModel):
     component_type: str  # 'earning', 'deduction', 'tax'
     description: str | None = None
 
+class SalaryComponentUpdate(BaseModel):
+    name: str | None = None
+    component_type: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+
+
 
 class SalaryComponentPublic(BaseModel):
     id: str

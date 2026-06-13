@@ -18,6 +18,9 @@ from app.schemas.payroll import (
     BatchPayrollResult,
     SalaryHistoryResponse,
     UpdateSalaryRequest,
+    SalaryComponentCreate,
+    SalaryComponentUpdate,
+    SalaryComponentPublic,
 )
 from app.services.payroll_service import (
     create_payslip,
@@ -33,6 +36,77 @@ from app.services.payroll_service import (
     update_salary,
 )
 router = APIRouter()
+
+
+# --- Salary Components ---
+
+@router.get('/components', response_model=list[SalaryComponentPublic])
+def list_components(
+    user: User = Depends(require_permissions('process_payroll')),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import SalaryComponent
+    components = db.query(SalaryComponent).filter(SalaryComponent.tenant_id == user.tenant_id).all()
+    return components
+
+@router.post('/components', response_model=SalaryComponentPublic)
+def create_component(
+    payload: SalaryComponentCreate,
+    user: User = Depends(require_permissions('process_payroll')),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import SalaryComponent
+    comp = SalaryComponent(
+        tenant_id=user.tenant_id,
+        name=payload.name,
+        component_type=payload.component_type,
+        description=payload.description,
+        is_active=True
+    )
+    db.add(comp)
+    db.commit()
+    db.refresh(comp)
+    return comp
+
+@router.put('/components/{component_id}', response_model=SalaryComponentPublic)
+def update_component(
+    component_id: str,
+    payload: SalaryComponentUpdate,
+    user: User = Depends(require_permissions('process_payroll')),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import SalaryComponent
+    comp = db.query(SalaryComponent).filter(SalaryComponent.id == component_id, SalaryComponent.tenant_id == user.tenant_id).first()
+    if not comp:
+        raise HTTPException(status_code=404, detail="Salary component not found")
+    
+    if payload.name is not None:
+        comp.name = payload.name
+    if payload.component_type is not None:
+        comp.component_type = payload.component_type
+    if payload.description is not None:
+        comp.description = payload.description
+    if payload.is_active is not None:
+        comp.is_active = payload.is_active
+        
+    db.commit()
+    db.refresh(comp)
+    return comp
+
+@router.delete('/components/{component_id}')
+def delete_component(
+    component_id: str,
+    user: User = Depends(require_permissions('process_payroll')),
+    db: Session = Depends(get_db),
+):
+    from app.db.models import SalaryComponent
+    comp = db.query(SalaryComponent).filter(SalaryComponent.id == component_id, SalaryComponent.tenant_id == user.tenant_id).first()
+    if not comp:
+        raise HTTPException(status_code=404, detail="Salary component not found")
+    
+    db.delete(comp)
+    db.commit()
+    return {"message": "Component deleted"}
 
 
 @router.get('/salary', response_model=SalaryPublic)
