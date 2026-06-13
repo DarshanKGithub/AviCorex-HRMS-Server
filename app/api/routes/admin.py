@@ -185,7 +185,8 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
         HelpdeskTicket, EmployeeGrievance, EmployeeDocument, OfferLetter, OnboardingTask,
         ExitInterview, EmployeeResignation, DisciplinaryAction, WarningLetter,
         PerformanceReview, PerformanceFeedback, JobPosting, JobApplication,
-        Notification, NotificationPreference, Announcement, Survey, SurveyQuestion, SurveyResponse
+        Notification, NotificationPreference, Announcement, Survey, SurveyQuestion, SurveyResponse,
+        AssetInventory, Interview
     )
 
     try:
@@ -222,6 +223,9 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
             db.query(EmployeeShiftAssignment).filter(EmployeeShiftAssignment.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             db.query(EmployeeSalaryComponent).filter(EmployeeSalaryComponent.employee_id.in_(employee_ids)).delete(synchronize_session=False)
             
+            # Detach assets
+            db.query(AssetInventory).filter(AssetInventory.employee_id.in_(employee_ids)).update({"employee_id": None}, synchronize_session=False)
+            
             
             # Nested dependencies for Payslip
             payslip_ids = db.scalars(select(Payslip.id).where(Payslip.employee_id.in_(employee_ids))).all()
@@ -244,6 +248,9 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
         if department_ids:
             job_posting_ids = db.scalars(select(JobPosting.id).where(JobPosting.department_id.in_(department_ids))).all()
             if job_posting_ids:
+                job_app_ids = db.scalars(select(JobApplication.id).where(JobApplication.job_id.in_(job_posting_ids))).all()
+                if job_app_ids:
+                    db.query(Interview).filter(Interview.application_id.in_(job_app_ids)).delete(synchronize_session=False)
                 db.query(JobApplication).filter(JobApplication.job_id.in_(job_posting_ids)).delete(synchronize_session=False)
             db.query(JobPosting).filter(JobPosting.department_id.in_(department_ids)).delete(synchronize_session=False)
 
@@ -257,6 +264,7 @@ def delete_tenant(tenant_id: str, actor: User = Depends(require_permissions('man
             db.query(Announcement).filter(Announcement.author_id.in_(user_ids)).delete(synchronize_session=False)
             db.query(Notification).filter(Notification.recipient_id.in_(user_ids)).delete(synchronize_session=False)
             db.query(NotificationPreference).filter(NotificationPreference.user_id.in_(user_ids)).delete(synchronize_session=False)
+            db.query(Interview).filter(Interview.interviewer_id.in_(user_ids)).delete(synchronize_session=False)
 
         db.query(Employee).filter(Employee.tenant_id == tenant_id).delete(synchronize_session=False)
         db.query(DbUser).filter(DbUser.tenant_id == tenant_id).delete(synchronize_session=False)
