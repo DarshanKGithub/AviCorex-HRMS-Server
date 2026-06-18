@@ -76,6 +76,9 @@ app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
 
+    from app.core.scheduler import start_scheduler
+    start_scheduler()
+
     # Run a lightweight schema backfill on startup so missing nullable columns
     # added by earlier deployments do not crash ORM reads before migrations land.
     # Set AUTO_APPLY_SCHEMA_CHANGES=false only if you want to disable this repair step.

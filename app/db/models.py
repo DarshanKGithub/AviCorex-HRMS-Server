@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, date, timedelta
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, String, Date, Numeric, select, ForeignKey, Integer, Text
+from sqlalchemy import Boolean, DateTime, String, Date, Numeric, select, ForeignKey, Integer, Text, Float
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from app.core.security import hash_password
@@ -382,7 +382,11 @@ class Attendance(Base):
     employee_id: Mapped[str] = mapped_column(String(36), ForeignKey('employees.id'), nullable=False, index=True)
     attendance_date: Mapped[date] = mapped_column(nullable=False, index=True)
     check_in_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_in_latitude: Mapped[float] = mapped_column(Float, nullable=True)
+    check_in_longitude: Mapped[float] = mapped_column(Float, nullable=True)
     check_out_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_out_latitude: Mapped[float] = mapped_column(Float, nullable=True)
+    check_out_longitude: Mapped[float] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # present, absent, half-day, work-from-home
     is_late: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     late_minutes: Mapped[int] = mapped_column(nullable=False, default=0)
@@ -391,6 +395,20 @@ class Attendance(Base):
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    breaks: Mapped[list['AttendanceBreak']] = relationship('AttendanceBreak', back_populates='attendance', cascade='all, delete-orphan')
+
+class AttendanceBreak(Base):
+    __tablename__ = 'attendance_breaks'
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    attendance_id: Mapped[str] = mapped_column(String(36), ForeignKey('attendance.id', ondelete='CASCADE'), nullable=False, index=True)
+    break_type: Mapped[str] = mapped_column(String(50), nullable=False, default='lunch')
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    attendance: Mapped['Attendance'] = relationship('Attendance', back_populates='breaks')
 
 
 class AttendanceRule(Base):

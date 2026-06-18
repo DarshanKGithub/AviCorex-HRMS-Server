@@ -21,6 +21,8 @@ from app.schemas.attendance import (
     PaginatedAttendance,
     CheckInRequest,
     CheckOutRequest,
+    StartBreakRequest,
+    EndBreakRequest,
     EmployeeAttendanceSummary,
 )
 from app.services.shift_service import (
@@ -33,6 +35,8 @@ from app.services.shift_service import (
 )
 from app.services.attendance_service import (
     create_attendance,
+    start_break,
+    end_break,
     get_attendance,
     check_in,
     check_out,
@@ -57,7 +61,11 @@ def _attendance_to_dict(a) -> dict:
         'employee_id': a.employee_id,
         'attendance_date': a.attendance_date,
         'check_in_time': a.check_in_time,
+        'check_in_latitude': getattr(a, 'check_in_latitude', None),
+        'check_in_longitude': getattr(a, 'check_in_longitude', None),
         'check_out_time': a.check_out_time,
+        'check_out_latitude': getattr(a, 'check_out_latitude', None),
+        'check_out_longitude': getattr(a, 'check_out_longitude', None),
         'status': a.status,
         'is_late': a.is_late,
         'late_minutes': a.late_minutes,
@@ -66,6 +74,17 @@ def _attendance_to_dict(a) -> dict:
         'notes': a.notes,
         'created_at': a.created_at,
         'updated_at': a.updated_at,
+        'breaks': [
+            {
+                'id': b.id,
+                'attendance_id': b.attendance_id,
+                'break_type': b.break_type,
+                'start_time': b.start_time,
+                'end_time': b.end_time,
+                'created_at': b.created_at,
+            }
+            for b in getattr(a, 'breaks', [])
+        ],
     }
 
 
@@ -178,6 +197,34 @@ def check_out_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot check out for other employees')
 
     attendance = check_out(payload, db, tenant_id=user.tenant_id)
+    return AttendancePublic.model_validate(_attendance_to_dict(attendance))
+
+
+@router.post('/start-break', response_model=AttendancePublic)
+def start_break_endpoint(
+    payload: StartBreakRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AttendancePublic:
+    """Record break start for an employee."""
+    if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot start break for other employees')
+
+    attendance = start_break(payload, db, tenant_id=user.tenant_id)
+    return AttendancePublic.model_validate(_attendance_to_dict(attendance))
+
+
+@router.post('/end-break', response_model=AttendancePublic)
+def end_break_endpoint(
+    payload: EndBreakRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AttendancePublic:
+    """Record break end for an employee."""
+    if payload.employee_id != user.id and not has_permission(user.role, 'approve_attendance'):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot end break for other employees')
+
+    attendance = end_break(payload, db, tenant_id=user.tenant_id)
     return AttendancePublic.model_validate(_attendance_to_dict(attendance))
 
 

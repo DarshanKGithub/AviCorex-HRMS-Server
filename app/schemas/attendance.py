@@ -72,7 +72,11 @@ class AttendanceBase(BaseModel):
     employee_id: str
     attendance_date: date
     check_in_time: datetime | None = None
+    check_in_latitude: float | None = None
+    check_in_longitude: float | None = None
     check_out_time: datetime | None = None
+    check_out_latitude: float | None = None
+    check_out_longitude: float | None = None
     status: str  # present, absent, half-day, work-from-home
     is_late: bool = False
     late_minutes: int = 0
@@ -97,23 +101,49 @@ class AttendanceUpdate(BaseModel):
     is_work_from_home: bool | None = None
     notes: str | None = None
 
+class AttendanceBreakBase(BaseModel):
+    attendance_id: str
+    break_type: str = 'lunch'
+    start_time: datetime
+    end_time: datetime | None = None
+
+class AttendanceBreakPublic(AttendanceBreakBase):
+    id: str
+    created_at: datetime
+
+class StartBreakRequest(BaseModel):
+    employee_id: str
+    attendance_date: date
+    break_type: str = 'lunch'
+    start_time: datetime | None = None
+
+class EndBreakRequest(BaseModel):
+    employee_id: str
+    attendance_date: date
+    end_time: datetime | None = None
+
 
 class CheckInRequest(BaseModel):
     employee_id: str
     attendance_date: date
     check_in_time: datetime | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class CheckOutRequest(BaseModel):
     employee_id: str
     attendance_date: date
     check_out_time: datetime | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class AttendancePublic(AttendanceBase):
     id: str
     created_at: datetime
     updated_at: datetime
+    breaks: list[AttendanceBreakPublic] = []
 
 
 class PaginatedAttendance(BaseModel):

@@ -62,7 +62,7 @@ class AttendanceRuleEngine:
         threshold = self.rules['late_entry'].threshold_minutes
         return late_minutes > threshold
 
-    def calculate_working_hours(self, check_in_time: datetime | None, check_out_time: datetime | None) -> float:
+    def calculate_working_hours(self, check_in_time: datetime | None, check_out_time: datetime | None, breaks_duration_hours: float = 0.0) -> float:
         """Calculate total working hours in decimal format."""
         if not check_in_time or not check_out_time:
             return 0.0
@@ -72,7 +72,7 @@ class AttendanceRuleEngine:
         elif check_in_time.tzinfo is not None and check_out_time.tzinfo is None:
             check_out_time = check_out_time.replace(tzinfo=timezone.utc)
         duration = check_out_time - check_in_time
-        return duration.total_seconds() / 3600  # Convert to hours
+        return max(0.0, (duration.total_seconds() / 3600) - breaks_duration_hours)
 
     def is_half_day(self, working_hours: float) -> bool:
         """Check if attendance qualifies as half-day."""
@@ -232,6 +232,10 @@ def check_in(payload: CheckInRequest, db: Session, tenant_id: str | None = None)
         existing.check_in_time = check_in_time
         existing.is_late = is_late
         existing.late_minutes = late_minutes
+        if payload.latitude is not None:
+            existing.check_in_latitude = payload.latitude
+        if payload.longitude is not None:
+            existing.check_in_longitude = payload.longitude
         existing.status = 'present'
         existing.updated_at = datetime.now(timezone.utc)
         db.add(existing)
@@ -250,6 +254,8 @@ def check_in(payload: CheckInRequest, db: Session, tenant_id: str | None = None)
             status='present',
             is_late=is_late,
             late_minutes=late_minutes,
+            check_in_latitude=payload.latitude,
+            check_in_longitude=payload.longitude,
         )
         db.add(attendance)
         db.commit()
@@ -288,8 +294,14 @@ def check_out(payload: CheckOutRequest, db: Session, tenant_id: str | None = Non
 
     check_out_time = payload.check_out_time or datetime.now(timezone.utc)
 
+    # Calculate total break duration
+    breaks_duration_hours = 0.0
+    for b in attendance.breaks:
+        if b.start_time and b.end_time:
+            breaks_duration_hours += (b.end_time - b.start_time).total_seconds() / 3600.0
+
     # Calculate working hours and half-day status
-    working_hours = rule_engine.calculate_working_hours(attendance.check_in_time, check_out_time)
+    working_hours = rule_engine.calculate_working_hours(attendance.check_in_time, check_out_time, breaks_duration_hours)
     is_half_day = rule_engine.is_half_day(working_hours)
 
     # Check for early exit
@@ -298,6 +310,10 @@ def check_out(payload: CheckOutRequest, db: Session, tenant_id: str | None = Non
     # Update attendance
     attendance.check_out_time = check_out_time
     attendance.is_half_day = is_half_day
+    if payload.latitude is not None:
+        attendance.check_out_latitude = payload.latitude
+    if payload.longitude is not None:
+        attendance.check_out_longitude = payload.longitude
     attendance.updated_at = datetime.now(timezone.utc)
     db.add(attendance)
     db.commit()
@@ -357,7 +373,11 @@ def update_attendance(attendance_id: str, payload: AttendanceUpdate, db: Session
 
     if payload.check_out_time is not None:
         attendance.check_out_time = payload.check_out_time
-        working_hours = rule_engine.calculate_working_hours(attendance.check_in_time, payload.check_out_time)
+        breaks_duration_hours = 0.0
+        for b in attendance.breaks:
+            if b.start_time and b.end_time:
+                breaks_duration_hours += (b.end_time - b.start_time).total_seconds() / 3600.0
+        working_hours = rule_engine.calculate_working_hours(attendance.check_in_time, payload.check_out_time, breaks_duration_hours)
         attendance.is_half_day = rule_engine.is_half_day(working_hours)
 
     if payload.status is not None:
@@ -476,3 +496,115 @@ def _write_attendance_audit_log(db: Session, action: str, attendance: Attendance
         except Exception:
             pass
         logger.exception('Failed to write attendance audit log for %s %s', action, attendance.id)
+
+
+def start_break(payload, db: Session, tenant_id: str | None = None):
+    from app.db.models import AttendanceBreak
+
+    # Get attendance record
+    query = db.query(Attendance)
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    attendance = query.filter(
+        and_(
+            Attendance.employee_id == payload.employee_id,
+            Attendance.attendance_date == payload.attendance_date,
+        )
+    ).first()
+
+    if not attendance:
+        raise HTTPException(status_code=404, detail="No check-in record found for today.")
+
+    if attendance.check_out_time:
+        raise HTTPException(status_code=400, detail="Already checked out.")
+
+    # Check for active break
+    active_break = next((b for b in attendance.breaks if not b.end_time), None)
+    if active_break:
+        raise HTTPException(status_code=400, detail="Break already in progress.")
+
+    new_break = AttendanceBreak(
+        attendance_id=attendance.id,
+        break_type=payload.break_type,
+        start_time=payload.start_time or datetime.now(timezone.utc)
+    )
+    db.add(new_break)
+    db.commit()
+    db.refresh(attendance)
+    return attendance
+
+
+def end_break(payload, db: Session, tenant_id: str | None = None):
+    from app.db.models import AttendanceBreak
+
+    # Get attendance record
+    query = db.query(Attendance)
+    if tenant_id:
+        query = query.join(Employee, Attendance.employee_id == Employee.id).filter(Employee.tenant_id == tenant_id)
+    attendance = query.filter(
+        and_(
+            Attendance.employee_id == payload.employee_id,
+            Attendance.attendance_date == payload.attendance_date,
+        )
+    ).first()
+
+    if not attendance:
+        raise HTTPException(status_code=404, detail="No check-in record found for today.")
+
+    # Check for active break
+    active_break = next((b for b in attendance.breaks if not b.end_time), None)
+    if not active_break:
+        raise HTTPException(status_code=400, detail="No active break to end.")
+
+    active_break.end_time = payload.end_time or datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(attendance)
+    return attendance
+
+
+def run_auto_checkout_job(db: Session):
+    """Automatically check out employees who forgot to log their departure."""
+    from datetime import datetime, timezone
+    from app.db.models import Attendance, Shift
+    from app.services.attendance_service import AttendanceRuleEngine
+
+    # For simplicity, we just sweep all records for today (or previous days) that have check_in but no check_out
+    now = datetime.now(timezone.utc)
+    
+    # Using UTC date might sweep records prematurely in some timezones if we just use now.date().
+    # A robust cron would check timezone mappings, but we'll stick to a simple sweep for now.
+    pending_records = db.query(Attendance).filter(
+        Attendance.check_in_time.isnot(None),
+        Attendance.check_out_time.is_(None)
+    ).all()
+
+    rule_engine = AttendanceRuleEngine(db)
+
+    for attendance in pending_records:
+        # End any active breaks
+        for b in attendance.breaks:
+            if not b.end_time:
+                b.end_time = now
+
+        # We will set their check-out time to either their shift end time or current time.
+        # To be safe, if this job runs at 11:59PM, we just use current time.
+        attendance.check_out_time = now
+        
+        # Calculate working hours and half-day status
+        breaks_duration_hours = sum(((b.end_time - b.start_time).total_seconds() / 3600.0) for b in attendance.breaks if b.start_time and b.end_time)
+        working_hours = rule_engine.calculate_working_hours(attendance.check_in_time, attendance.check_out_time, breaks_duration_hours)
+        attendance.is_half_day = rule_engine.is_half_day(working_hours)
+        
+        # Append a note to indicate it was auto-checked out
+        note_append = "System: Auto-checked out at end of day."
+        if attendance.notes:
+            attendance.notes = f"{attendance.notes} | {note_append}"
+        else:
+            attendance.notes = note_append
+
+        attendance.updated_at = now
+        
+        _write_attendance_audit_log(db, 'AUTO_CHECKOUT', attendance)
+
+    db.commit()
+    logger.info(f"Auto-checkout job completed. Processed {len(pending_records)} records.")

@@ -36,5 +36,6 @@ def backfill_columns():
                         print(f"Failed to add column {table_name}.{column.name}: {e}")
 
 if __name__ == "__main__":
+    Base.metadata.create_all(engine)
     backfill_columns()
-    print("Backfill complete.")
+    print("Backfill and table creation complete.")
